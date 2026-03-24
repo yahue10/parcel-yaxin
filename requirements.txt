@@ -1,0 +1,6 @@
+gurobipy
+pandas
+plotly
+matplotlib
+networkx
+numpy
