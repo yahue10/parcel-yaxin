@@ -84,7 +84,8 @@ but SAA.py always relies on the clean, minimal interface defined here.
 
 
 
-from gurobipy import Model, GRB, quicksum
+from gurobipy import Model, GRB, quicksum, Env
+
 import random
 import pandas as pd
 import plotly.graph_objects as go
@@ -98,6 +99,10 @@ import re
 
 import csv
 import os
+import pickle
+
+from plots import (extract_ST, extract_static, extract_ST_costs,
+                    plot_compare_subcontracting, plot_compare_resource, plot_compare_costs)
 
 
 class VehicleAllocationModel:
@@ -115,45 +120,83 @@ class VehicleAllocationModel:
         return 1 / len(self.O)
 
     def generate_data(self):
-        self.Ki = self.K
+        # part fix with K = 2
+        self.Ki = {i: self.K for i in self.N}
 
-        self.q = {k: random.randint(10, 30) for k in self.K}
-        self.beta = {k: random.randint(5, 10) for k in self.K}
-        self.alpha = {(i, j, k): random.randint(1, 5) for i in self.N for j in self.N for k in self.K}
-        self.gamma = {k: random.randint(15, 20) for k in self.K}
-        self.gamma_corr = {k: self.gamma[k] + random.randint(5, 10) for k in self.K}
+        self.q = {0:10, 1:120}
+        self.beta = {0:500, 1:5000}
+        self.alpha = {(i, j, 0): 1 for i in self.N for j in self.N}
+        self.alpha.update({(i, j, 1): 5 for i in self.N for j in self.N})
+        self.gamma = {0:20, 1:200}
+        self.gamma_corr = {0:30, 1:250}
 
-        self.d_pred = {(i, t): random.randint(40, 80) for i in self.N for t in self.T}
-        self.theta = {i: round(random.uniform(0.3, 0.6), 2) for i in self.N}
+        # # Poisson demand with rough negative correlation across hubs
+        # # Each hub has its own mean; a shared per-period shift pushes some hubs up and others down
+        # self.d_pred = {}
+        # mean_demand = {i: random.randint(200, 400) for i in self.N}
+        # sign = {i: 1 if i % 2 == 0 else -1 for i in self.N}  # alternating +/-
+        # for t in self.T:
+        #     shift = random.randint(30, 80)
+        #     for i in self.N:
+        #         base = np.random.poisson(lam=mean_demand[i])
+        #         self.d_pred[i, t] = max(0, base + sign[i] * shift)
+        # for i in self.N:
+        #     mean_demand = {i: random.randint(200, 400) for i in self.N}
+        #     self.d_pred = {(i, t): np.random.poisson(lam=mean_demand[i]) for i in self.N for t in self.T}
+        
+        for i in self.N:
+            self.d_pred = {(i, t): random.randint(200+i*100, 400+i*100) for i in self.N for t in self.T}
+
+        self.theta = {i: 0.3 for i in self.N}
         self.l = {(i, k): 1 for i in self.N for k in self.K}
-        self.g = {k: 1 for k in self.K}
+        self.g = {0:1, 1:0}
 
-        self.lat = {i: random.uniform(43.0, 50.0) for i in self.N}
-        self.lon = {i: random.uniform(0.5, 6.0) for i in self.N}
-
-        self.M1 = {k: 10 for k in self.K}
+        self.M1 = {0:80, 1:60}
         self.S = self.M1
-        self.M2 = {k: 100 for k in self.K}
-        self.M3 = {k: 100 for k in self.K}
-        self.M4 = {k: 100 for k in self.K}
+
+
+
+        # random
+        # self.Ki = self.K
+
+        # self.q = {k: random.randint(30, 50) for k in self.K}
+        # self.beta = {k: random.randint(100, 150) for k in self.K}
+        # self.alpha = {(i, j, k): random.randint(0, 2) for i in self.N for j in self.N for k in self.K}
+        # self.gamma = {k: random.randint(5, 10) for k in self.K}
+        # self.gamma_corr = {k: self.gamma[k] + random.randint(5, 10) for k in self.K}
+        # # self.gamma_corr = {k: 25 for k in self.K}
+
+        # self.d_pred = {(i, t): random.randint(40, 80) for i in self.N for t in self.T}
+        # self.theta = {i: round(random.uniform(0.3, 0.6), 2) for i in self.N}
+        # self.l = {(i, k): 1 for i in self.N for k in self.K}
+        # self.g = {k: 1 for k in self.K}
+
+        # self.lat = {i: random.uniform(43.0, 50.0) for i in self.N}
+        # self.lon = {i: random.uniform(0.5, 6.0) for i in self.N}
+
+        # self.M1 = {k: 7 for k in self.K}
+        # self.S = self.M1
+        # self.M2 = {k: 100 for k in self.K}
+        # self.M3 = {k: 100 for k in self.K}
+        # self.M4 = {k: 100 for k in self.K}
 
         self.generate_scenarios_from_dict()
 
 
-    def generate_scenarios(self):
-        self.d_real = []
-        for o in self.O:
-            do = []
-            for i in self.N:
-                doi = []
-                di = [self.d_pred[i][t] for t in self.T]
-                #print(di)
-                for t in self.T:
-                    noise = np.std(di)
-                    doi.append( max(0, self.d_pred[i][t] + noise))
-                do.append(doi)
-            self.d_real.append(do)
-        print(np.shape(self.d_real))
+    # def generate_scenarios(self):
+    #     self.d_real = []
+    #     for o in self.O:
+    #         do = []
+    #         for i in self.N:
+    #             doi = []
+    #             di = [self.d_pred[i][t] for t in self.T]
+    #             #print(di)
+    #             for t in self.T:
+    #                 noise = np.std(di)
+    #                 doi.append( max(0, self.d_pred[i][t] + noise))
+    #             do.append(doi)
+    #         self.d_real.append(do)
+    #     print(np.shape(self.d_real))
 
 
         
@@ -164,7 +207,10 @@ class VehicleAllocationModel:
                 di = [self.d_pred[i, t] for t in self.T]
                 std_dev = np.std(di)
                 for t in self.T:
-                    perturbed = max(0, self.d_pred[i, t] + std_dev)
+                    noise = random.gauss(0, 1)  # Standard normal noise scaled by std_dev and direction
+                    print(f"Hub {i}, Time {t}: Predicted={self.d_pred[i, t]}, Noise={noise:.2f}, StdDev={std_dev:.2f}")
+                    noise = std_dev * noise
+                    perturbed = max(0, self.d_pred[i, t] + noise)
                     self.d_real[i, t, o] = perturbed
 
 
@@ -250,12 +296,15 @@ class VehicleAllocationModel:
 
 
 
-    def build_model1(self):
+    def build_model_ST(self, env=None):
         """
         Le BON
         
         """
-        self.model = Model("VehicleAllocation")
+        if env is not None:
+            self.model = Model(env=env, name="DynamicVehicleAllocation")
+        else:
+            self.model = Model(name="DynamicVehicleAllocation")
 
         # VARIABLES
         X = self.model.addVars(self.K, vtype=GRB.INTEGER, name="X")
@@ -291,11 +340,11 @@ class VehicleAllocationModel:
         for i in self.N:
             for t in self.T:
                 self.model.addConstr(
-                    quicksum(self.q[k] * (x[i, k, t] + s[i, k, t]) for k in self.Ki) >= self.d_pred[i, t],
+                    quicksum(self.q[k] * (x[i, k, t] + s[i, k, t]) for k in self.Ki[i]) >= self.d_pred[i, t],
                     name=f"pred_demand_{i}_{t}"
                 )
                 self.model.addConstr(
-                    quicksum(self.g[k] * self.q[k] * (x[i, k, t] + s[i, k, t]) for k in self.Ki) >= self.theta[i] * self.d_pred[i, t],
+                    quicksum(self.g[k] * self.q[k] * (x[i, k, t] + s[i, k, t]) for k in self.Ki[i]) >= self.theta[i] * self.d_pred[i, t],
                     name=f"green_pred_{i}_{t}"
                 )
 
@@ -307,17 +356,17 @@ class VehicleAllocationModel:
                         inflow_k = 0
                         outflow_k = 0
                     else:
-                        inflow_k = quicksum(self.q[k]* y[j, i, k, t - 1, o] for j in self.N for k in self.Ki)
-                        outflow_k = quicksum(self.q[k]*y[i, j, k, t - 1, o] for j in self.N for k in self.Ki)
+                        inflow_k = quicksum(self.q[k]* y[j, i, k, t - 1, o] for j in self.N for k in self.Ki[i])
+                        outflow_k = quicksum(self.q[k]*y[i, j, k, t - 1, o] for j in self.N for k in self.Ki[i])
                     self.model.addConstr(
                         quicksum(self.q[k] * (
-                            x[i, k, t]  + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki) + inflow_k - outflow_k
+                            x[i, k, t]  + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i]) + inflow_k - outflow_k
                          >= self.d_real[i, t, o],
                         name=f"real_demand_{i}_{k}_{t}_{o}"
                     )
                     self.model.addConstr(
                         quicksum(self.g[k] * self.q[k] * (
-                            x[i, k, t]+ s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki) + inflow_k - outflow_k 
+                            x[i, k, t]+ s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i]) + inflow_k - outflow_k 
                          >= self.theta[i] * self.d_real[i, t, o],
                         name=f"green_real_{i}_{k}_{t}_{o}"
                     )
@@ -332,130 +381,140 @@ class VehicleAllocationModel:
                             outflow_k = quicksum(y[i, j, k, t - 1, o] for j in self.N)
                             self.model.addConstr(x[i, k, t] == x[i, k, t-1] + inflow_k - outflow_k, name="precedence")
 
+    def build_model_static(self, env=None):
+
+        if env is not None:
+            self.model = Model(env=env, name="StaticVehicleAllocation")
+        else:
+            self.model = Model(name="StaticVehicleAllocation")
+
+        # Max demand per hub across all time periods
+        d_max = {i: max(self.d_real[i, t, o] for t in self.T for o in self.O) for i in self.N}
+
+        # VARIABLES
+        X = self.model.addVars(self.K, vtype=GRB.INTEGER, name="X")
+        x = self.model.addVars(self.N, self.K, vtype=GRB.INTEGER, name="x")
+        s = self.model.addVars(self.N, self.K, self.T, vtype=GRB.INTEGER, name="s")
+
+        # OBJECTIVE
+        self.model.setObjective(
+            quicksum(self.beta[k] * X[k] for k in self.K) +
+            quicksum(self.gamma[k] * s[i, k, t] for i in self.N for k in self.K for t in self.T) ,
+            GRB.MINIMIZE
+        )
+
+        # CONSTRAINTS
+
+        # Planification support
+        for k in self.K:
+            self.model.addConstr(X[k] <= self.S[k], name=f"stock_max_{k}")
+            self.model.addConstr(quicksum(x[i, k] for i in self.N) <= X[k], name=f"stock_sum_{k}")
+
+        # Demand coverage using d_max (static allocation must cover peak demand)
+        for i in self.N:
+            self.model.addConstr(
+                quicksum(self.q[k] * x[i, k] for k in self.Ki[i]) >= d_max[i],
+                name=f"peak_demand_{i}"
+            )
+            self.model.addConstr(
+                quicksum(self.g[k] * self.q[k] * x[i, k] for k in self.Ki[i]) >= self.theta[i] * d_max[i],
+                name=f"green_peak_{i}"
+            )
+
+        # # Per-period demand coverage (x + s must still cover each period)
+        # for i in self.N:
+        #     for t in self.T:
+        #         self.model.addConstr(
+        #             quicksum(self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.d_pred[i, t],
+        #             name=f"pred_demand_{i}_{t}"
+        #         )
+        #         self.model.addConstr(
+        #             quicksum(self.g[k] * self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.theta[i] * self.d_pred[i, t],
+        #             name=f"green_pred_{i}_{t}"
+        #         )
+
+    
         
 
     
         
-    def solve(self,log:bool,timelimit):
+    def solve_ST(self, params=None, options=None):
         """
-        marche avec build1
-        """
-        if log:
-            self.build_model1()
-            self.model.setParam("TimeLimit", timelimit)
-            self.model.setParam("OutputFlag", 0)
-            self.model.setParam("LogFile", "gurobi_log.txt")
-            print('opt start')
-            self.model.optimize()
-            if self.model.status == GRB.OPTIMAL:
-                print("✅ Optimal solution found:", self.model.ObjVal)
-            else:
-                print("❌ No optimal solution.")
-        else:
-            self.build_model1()
-            #self.model.setParam("TimeLimit", 200)
-            print('opt start')
-            self.model.optimize()
-            if self.model.status == GRB.OPTIMAL:
-                print("✅ Optimal solution found:", self.model.ObjVal)
-            else:
-                print("❌ No optimal solution.")
+        Build and solve the model.
 
+        params : dict – Gurobi parameters, e.g.
+            {"TimeLimit": 500, "MIPGap": 0.01, "Threads": 4,
+             "OutputFlag": 0, "LogFile": "gurobi_log.txt"}
+        """
+        if options is not None:
+            env = Env(params=options)
+        else:
+            env = Env()
+
+        self.build_model_ST(env=env)
+
+        if params:
+            for name, value in params.items():
+                self.model.setParam(name, value)
+
+        print('opt start')
+        self.model.optimize()
+
+        if self.model.status == GRB.OPTIMAL:
+            print(f"Optimal solution found: {self.model.ObjVal}")
+        elif self.model.status == GRB.TIME_LIMIT:
+            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+        elif self.model.status == GRB.INFEASIBLE:
+            print("Model is infeasible.")
+        else:
+            print(f"Optimization ended with status {self.model.status}")
+
+    def solve_static(self, params=None, options=None):
+        """
+        Build and solve the model.
+
+        params : dict – Gurobi parameters, e.g.
+            {"TimeLimit": 500, "MIPGap": 0.01, "Threads": 4,
+             "OutputFlag": 0, "LogFile": "gurobi_log.txt"}
+        """
+        if options is not None:
+            env = Env(params=options)
+        else:
+            env = Env()
+        self.build_model_static(env=env)
+
+        if params:
+            for name, value in params.items():
+                self.model.setParam(name, value)
+
+        print('opt start')
+        self.model.optimize()
+
+        if self.model.status == GRB.OPTIMAL:
+            print(f"Optimal solution found: {self.model.ObjVal}")
+        elif self.model.status == GRB.TIME_LIMIT:
+            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+        elif self.model.status == GRB.INFEASIBLE:
+            print("Model is infeasible.")
+        else:
+            print(f"Optimization ended with status {self.model.status}")
 
     
 
     
     def _get_val(self, var_name):
         var = self.model.getVarByName(var_name)
-        return var.X if var else 0.0
+        if var is None:
+            return 0.0
+        try:
+            return var.X
+        except AttributeError:
+            return 0.0
 
 
 
-    def export_solution_summary1(self, filename="solution_summary.txt"):
-        with open(filename, "w") as f:
-            def write(line=""):
-                f.write(line + "\n")
-
-            write("Resource Allocation, Rebalancing Plan, Outsourcing, and Demand Analysis")
-            write("=" * 80)
-
-            write("\nAllocated Resources:")
-            for i in self.N:
-                allocations = [f"{self._get_val(f'x[{i},{k}]'):.0f} of type {k}" for k in self.K]
-                write(f"Hub {i} has: " + ", ".join(allocations))
-
-            
-            write("\n" + "=" * 80 + "\n\n Anticipated Outsourced Resources:")
-            for t in self.T:
-                write(f"Week {t+1}:")
-                found = False
-                for i in self.N:
-                    for k in self.K:
-                        val = self._get_val(f's[{i},{k},{t}]')
-                        if val >= 0.5:
-                            write(f"  Hub {i} outsourced {int(val)} of type {k} (week {t})")
-                            found = True
-                if not found:
-                    write("  No outsourcing")
-            
-            
-            
-            write("\n" + "=" * 80 + "\n\nRebalancing Plan:")
-            for t in self.T:
-                write(f"Week {t+1}:")
-                found = False
-                for o in self.O:
-                    for i in self.N:
-                        for j in self.N:
-                            if i != j:
-                                for k in self.K:
-                                    name = f"y[{i},{j},{k},{t},{o}]"
-                                    val = self._get_val(name)
-                                    if val >= 0.5:
-                                        write(f"  Hub {i} sends {int(val)} of type {k} to Hub {j} (Scenario {o})")
-                                        found = True
-                if not found:
-                    write("  No transfers")   
-            
-            write("\n" + "=" * 80 + "\n\nOutsourced Resources Corrected:")
-            for t in self.T:
-                write(f"Week {t+1}:")
-                found = False
-                for o in self.O:
-                    for i in self.N:
-                        for k in self.K:
-                            val = self._get_val(f"s_corr[{i},{k},{t},{o}]")
-                            if val >= 0.5:
-                                write(f"  Hub {i} outsourced {int(val)} of type {k} (Scenario {o}, week {t})")
-                                found = True
-                if not found:
-                    write("  No outsourcing")
-
-            write("\n" + "=" * 80 + "\n\nDemand Fulfillment Summary:")
-            for t in self.T:
-                for o in self.O:
-                    for i in self.N:
-                        total_available = sum(
-                            self.q[k] * (self._get_val(f"v[{i},{k},{t},{o}]")
-                                        + self._get_val(f"s[{i},{k},{t}]")
-                                        + self._get_val(f"s_corr[{i},{k},{t},{o}]"))
-                            for k in self.K)
-                        demand = self.d_real[i, t, o]
-                        write(f"Hub {i} (t={t}, scenario={o}): demand={demand}, fulfilled={int(total_available)}")
-
-            write("\n" + "=" * 80 + "\n\nGreen Vehicle Contribution:")
-            for t in self.T:
-                for i in self.N:
-                    green_capacity = sum(
-                        self.g[k] * self.q[k] * (
-                            self._get_val(f"x[{i},{k}]") +
-                            self._get_val(f"s[{i},{k},{t}]") +
-                            self._get_val(f"s_corr[{i},{k},{t},0]"))
-                        for k in self.K)
-                    required = self.theta[i] * self.d_pred[i, t]
-                    write(f"Hub {i} (t={t}): Green capacity = {green_capacity:.1f}, Required = {required:.1f}")
-
-    def export_solution_summaryuiui(self, filename="solution_summary.txt"): # simple et efficace
+    
+    def export_solution_summaryuiui(self, filename="solution_summary.txt"): 
         with open(filename, "w") as f:
             def write(line=""):
                 f.write(line + "\n")
@@ -520,19 +579,89 @@ class VehicleAllocationModel:
     
 
 
-if __name__ == "__main__":
-    """M = VehicleAllocationModel(100,3,25,40,seed=111) #(self, N, K, T, O, seed=42):
-    #M.DataManoTest(True)
-    start = time.time()
-    M.generate_data()
-    M.solve(False)
-    end = time.time()
+    @staticmethod
+    def rebalancing_plan(y, scenario, t_start, t_end):
+        """
+        Print the rebalancing plan from pre-extracted y dict.
+        y: dict with keys (i, j, k, t, o) from extract_ST()
+        """
+        print(f"\nRebalancing Plan — Scenario {scenario}, periods [{t_start}, {t_end}]")
+        print("=" * 60)
+        for t in range(t_start, t_end + 1):
+            transfers = []
+            for (i, j, k, tp, o), val in y.items():
+                if o == scenario and tp == t:
+                    transfers.append(f"  Hub {i} -> Hub {j}: {val:.0f} of type {k}")
+            print(f"\nPeriod {t}:")
+            if transfers:
+                print("\n".join(sorted(transfers)))
+            else:
+                print("  No transfers")
 
-    runtime = round(end - start, 2)
-    print(f'solve + gen data = {runtime}')"""
-    #M.export_solution_summaryuiui(filename="ui.txt")
+    def save_instance(self, filepath):
+        """Save all data attributes (everything from generate_data) to a pickle file."""
+        data = {k: v for k, v in self.__dict__.items() if k != 'model'}
+        with open(filepath, 'wb') as f:
+            pickle.dump(data, f)
+        print(f"Instance saved to {filepath}")
+
+    def load_instance(self, filepath):
+        """Load data attributes from a pickle file."""
+        with open(filepath, 'rb') as f:
+            data = pickle.load(f)
+        self.__dict__.update(data)
+        print(f"Instance loaded from {filepath}")
+
+
+if __name__ == "__main__":
+    options = {
+        'WLSACCESSID': "30bca212-81df-41cc-a94e-a0269b14a3ec",
+        'WLSSECRET': "215eee4c-3130-4a8b-8156-898521b84f16",
+        'LICENSEID': 2738996,
+        'WLSTOKENDURATION': 10 #mins
+    }
+    N, K, T, O = 3, 2, 52, 100
+    M = VehicleAllocationModel(N, K, T, O, seed=42)
+
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    exp_dir = os.path.join("experimentsIPIC", f"exp{N}_{K}_{T}_{O}_{timestamp}")
+    os.makedirs(exp_dir, exist_ok=True)
+
+    M.generate_data()
+    M.save_instance(os.path.join(exp_dir, "instance.pkl"))
+    start = time.time()
+    M.solve_static(params={"TimeLimit": 3600, "MIPGap": 0.01}, options=options)
+    end1 = time.time()
+    static_x, static_s = extract_static(M)
+    static_obj = M.model.ObjVal
+    
+    M.solve_ST(params={"TimeLimit": 3600, "MIPGap": 0.01}, options=options)
+    end2 = time.time()
+    print(f'solve_static in {round(end2 - end1, 2)} seconds')
+    print(f'solve_ST in {round(end1 - start, 2)} seconds')
+    M.export_solution_summaryuiui(filename=os.path.join(exp_dir, "ui.txt"))
+    st_x, st_s, st_y = extract_ST(M)
+    st_costs = extract_ST_costs(M)
+
+    # Save ST rebalancing solution
+    with open(os.path.join(exp_dir, "st_y.pkl"), 'wb') as f:
+        pickle.dump(st_y, f)
+
+    plot_compare_subcontracting(M, st_s, static_s, output_dir=exp_dir)
+    plot_compare_resource(M, st_x, static_x, output_dir=exp_dir)
+    plot_compare_costs(M, st_costs, static_obj, output_dir=exp_dir)
+
+    # Example: rebalancing plan for scenario 4, periods 5 to 15
+    M.rebalancing_plan(st_y, scenario=4, t_start=5, t_end=15)
+
+
+
+
+
+
+    # by maher
     #M.plot_solution_map(scenario=0)
     #M.plot_rebalancing_solution(scenario=0)
     #plot_solution_graph_from_file(filename="bismillah.txt",N=5,T=5)
-
 
