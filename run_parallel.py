@@ -27,13 +27,9 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 # Configuration
 # ---------------------------------------------------------------------------
 
-# Gurobi WLS license options (shared by all workers)
-GUROBI_OPTIONS = {
-    'WLSACCESSID': "30bca212-81df-41cc-a94e-a0269b14a3ec",
-    'WLSSECRET': "215eee4c-3130-4a8b-8156-898521b84f16",
-    'LICENSEID': 2738996,
-    'WLSTOKENDURATION': 10,  # minutes
-}
+# Gurobi license: uses the local server license (gurobi.lic / token server).
+# No WLS options needed — Gurobi will auto-detect the license on the machine.
+GUROBI_OPTIONS = None
 
 # Solver parameters passed to Gurobi
 SOLVER_PARAMS = {

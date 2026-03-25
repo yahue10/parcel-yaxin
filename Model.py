@@ -87,22 +87,10 @@ but SAA.py always relies on the clean, minimal interface defined here.
 from gurobipy import Model, GRB, quicksum, Env
 
 import random
-import pandas as pd
-import plotly.graph_objects as go
 import time
-
-import matplotlib.pyplot as plt
-from matplotlib import cm
-import networkx as nx
 import numpy as np
-import re
-
-import csv
 import os
 import pickle
-
-from plots import (extract_ST, extract_static, extract_ST_costs,
-                    plot_compare_subcontracting, plot_compare_resource, plot_compare_costs)
 
 
 class VehicleAllocationModel:
@@ -614,6 +602,8 @@ class VehicleAllocationModel:
 
 
 if __name__ == "__main__":
+    from plots import (extract_ST, extract_static, extract_ST_costs,
+                        plot_compare_subcontracting, plot_compare_resource, plot_compare_costs)
     options = {
         'WLSACCESSID': "30bca212-81df-41cc-a94e-a0269b14a3ec",
         'WLSSECRET': "215eee4c-3130-4a8b-8156-898521b84f16",
