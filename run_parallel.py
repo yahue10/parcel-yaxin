@@ -214,7 +214,8 @@ def main():
         print(f"{r['label']:<20} {static} {mnp} {mrp} {t}  {r.get('exp_dir', '')}")
 
     # Save combined results
-    os.makedirs("experiments_parallel", exist_ok=True) summary_path = os.path.join("experiments_parallel", "all_results.pkl")
+    os.makedirs("experiments_parallel", exist_ok=True)
+    summary_path = os.path.join("experiments_parallel", "all_results.pkl")
     with open(summary_path, "wb") as f:
         pickle.dump(all_results, f)
     print(f"\nCombined results saved to {summary_path}")
