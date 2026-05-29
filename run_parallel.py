@@ -33,26 +33,19 @@ GUROBI_OPTIONS = None
 
 # Solver parameters passed to Gurobi
 SOLVER_PARAMS = {
-    "TimeLimit": 1600,
+    "TimeLimit": 72000,
     "MIPGap": 0.01,
-    # Limit threads per solve so parallel instances don't fight for CPU.
-    # Rule of thumb: total_cores / MAX_WORKERS
-    "Threads": 2,
+    "Threads": 32,   # ~total_cores / MAX_WORKERS; sweet spot for Gurobi MIP
+    "Presolve": 2,
 }
 
-# Number of parallel workers. Set to None to use all CPUs.
-# On Windows with WLS license, keep this <= your license's concurrent-use limit.
-MAX_WORKERS = 4
+MAX_WORKERS = 2
 
 # Define the instances to solve.
 # Each dict is passed to one worker. Vary N, O, seed, etc. as needed.
 INSTANCES = [
-    {"N": 3,  "K": 2, "T": 52, "O": 100, "seed": 42,  "label": "small_s42"},
-    {"N": 3,  "K": 2, "T": 52, "O": 100, "seed": 123, "label": "small_s123"},
-    {"N": 5,  "K": 2, "T": 52, "O": 100, "seed": 42,  "label": "med_s42"},
-    {"N": 5,  "K": 2, "T": 52, "O": 100, "seed": 123, "label": "med_s123"},
-    {"N": 10, "K": 2, "T": 52, "O": 100, "seed": 42,  "label": "large_s42"},
-    {"N": 10, "K": 2, "T": 52, "O": 100, "seed": 123, "label": "large_s123"},
+    {"N": 20, "K": 3, "T": 52, "O": 100, "seed": 42,  "label": "xlarge_s42"},
+    {"N": 20, "K": 3, "T": 52, "O": 100, "seed": 123, "label": "xlarge_s123"},
 ]
 
 
@@ -62,12 +55,18 @@ INSTANCES = [
 
 def solve_instance(instance_cfg):
     """
-    Solve one instance (static + ST) and return a results dict.
+    Solve one instance (static + MNP + MRP) and return a results dict.
     This function runs in its own process with its own Gurobi environment.
     """
-    # Import here so each subprocess has its own module state
+    import matplotlib
+    matplotlib.use("Agg")
+
     from Model import VehicleAllocationModel
-    from plots import extract_ST, extract_static, extract_ST_costs
+    from plots import (extract_static, extract_MNP, extract_MNP_costs,
+                       extract_MRP, extract_MRP_costs,
+                       plot_compare_subcontracting_3way,
+                       plot_compare_resource_3way,
+                       plot_compare_costs_3way)
 
     label = instance_cfg["label"]
     N = instance_cfg["N"]
@@ -78,12 +77,10 @@ def solve_instance(instance_cfg):
 
     print(f"[{label}] Starting: N={N}, K={K}, T={T}, O={O}, seed={seed}")
 
-    # Create output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = os.path.join("experiments_parallel", f"{label}_{timestamp}")
     os.makedirs(exp_dir, exist_ok=True)
 
-    # Build model and generate data
     M = VehicleAllocationModel(N, K, T, O, seed=seed)
     M.generate_data()
     M.save_instance(os.path.join(exp_dir, "instance.pkl"))
@@ -94,60 +91,75 @@ def solve_instance(instance_cfg):
         "exp_dir": exp_dir,
     }
 
-    # --- Solve static model ---
+    # --- Static ---
     t0 = time.time()
     M.solve_static(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
     t_static = time.time() - t0
 
-    if M.model.status in (2, 9):  # OPTIMAL or TIME_LIMIT
+    static_x = static_s = static_obj = None
+    if M.model.status in (2, 9):
         static_obj = M.model.ObjVal
-        static_gap = M.model.MIPGap
         static_x, static_s = extract_static(M)
         result["static_obj"] = static_obj
-        result["static_gap"] = static_gap
+        result["static_gap"] = M.model.MIPGap
         result["static_time"] = t_static
+        print(f"[{label}] Static done in {t_static:.1f}s  obj={static_obj:.0f}")
     else:
         result["static_obj"] = None
         result["static_time"] = t_static
-        print(f"[{label}] Static model ended with status {M.model.status}")
+        print(f"[{label}] Static ended with status {M.model.status}")
 
-    # --- Solve ST model ---
+    # --- MNP ---
     t0 = time.time()
-    M.solve_ST(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
-    t_st = time.time() - t0
+    M.solve_MNP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    t_mnp = time.time() - t0
 
+    mnp_x = mnp_s = mnp_costs = None
     if M.model.status in (2, 9):
-        st_obj = M.model.ObjVal
-        st_gap = M.model.MIPGap
-        st_x, st_s, st_y = extract_ST(M)
-        st_costs = extract_ST_costs(M)
-        result["st_obj"] = st_obj
-        result["st_gap"] = st_gap
-        result["st_time"] = t_st
-
-        # Save rebalancing solution
-        with open(os.path.join(exp_dir, "st_y.pkl"), "wb") as f:
-            pickle.dump(st_y, f)
-
-        # Generate plots (non-interactive, safe for subprocesses)
-        import matplotlib
-        matplotlib.use("Agg")
-        from plots import (plot_compare_subcontracting,
-                           plot_compare_resource, plot_compare_costs)
-        if result.get("static_obj") is not None:
-            plot_compare_subcontracting(M, st_s, static_s, output_dir=exp_dir)
-            plot_compare_resource(M, st_x, static_x, output_dir=exp_dir)
-            plot_compare_costs(M, st_costs, static_obj, output_dir=exp_dir)
+        mnp_obj = M.model.ObjVal
+        mnp_x, mnp_s = extract_MNP(M)
+        mnp_costs = extract_MNP_costs(M)
+        result["mnp_obj"] = mnp_obj
+        result["mnp_gap"] = M.model.MIPGap
+        result["mnp_time"] = t_mnp
+        print(f"[{label}] MNP done in {t_mnp:.1f}s  obj={mnp_obj:.0f}")
     else:
-        result["st_obj"] = None
-        result["st_time"] = t_st
-        print(f"[{label}] ST model ended with status {M.model.status}")
+        result["mnp_obj"] = None
+        result["mnp_time"] = t_mnp
+        print(f"[{label}] MNP ended with status {M.model.status}")
 
-    result["total_time"] = t_static + t_st
+    # --- MRP ---
+    t0 = time.time()
+    M.solve_MRP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    t_mrp = time.time() - t0
+
+    mrp_x = mrp_s = mrp_costs = None
+    if M.model.status in (2, 9):
+        mrp_obj = M.model.ObjVal
+        mrp_x, mrp_s, mrp_y = extract_MRP(M)
+        mrp_costs = extract_MRP_costs(M)
+        result["mrp_obj"] = mrp_obj
+        result["mrp_gap"] = M.model.MIPGap
+        result["mrp_time"] = t_mrp
+        print(f"[{label}] MRP done in {t_mrp:.1f}s  obj={mrp_obj:.0f}")
+
+        with open(os.path.join(exp_dir, "mrp_y.pkl"), "wb") as f:
+            pickle.dump(mrp_y, f)
+    else:
+        result["mrp_obj"] = None
+        result["mrp_time"] = t_mrp
+        print(f"[{label}] MRP ended with status {M.model.status}")
+
+    # --- 3-way plots ---
+    if all(v is not None for v in [static_obj, mnp_costs, mrp_costs]):
+        plot_compare_subcontracting_3way(M, mrp_s, mnp_s, static_s, output_dir=exp_dir)
+        plot_compare_resource_3way(M, mrp_x, mnp_x, static_x, output_dir=exp_dir)
+        plot_compare_costs_3way(M, mrp_costs, mnp_costs, static_obj, output_dir=exp_dir)
+
+    result["total_time"] = t_static + t_mnp + t_mrp
     print(f"[{label}] Done in {result['total_time']:.1f}s "
-          f"(static={t_static:.1f}s, ST={t_st:.1f}s)")
+          f"(static={t_static:.1f}s, MNP={t_mnp:.1f}s, MRP={t_mrp:.1f}s)")
 
-    # Save result summary
     with open(os.path.join(exp_dir, "result.pkl"), "wb") as f:
         pickle.dump(result, f)
 
@@ -189,20 +201,20 @@ def main():
     print("\n" + "=" * 70)
     print(f"ALL DONE in {total_time:.1f}s")
     print("=" * 70)
-    print(f"{'Label':<20} {'Static Obj':>12} {'ST Obj':>12} {'Time (s)':>10} {'Dir'}")
-    print("-" * 70)
+    print(f"{'Label':<20} {'Static':>12} {'MNP':>12} {'MRP':>12} {'Time (s)':>10}  Dir")
+    print("-" * 90)
     for r in sorted(all_results, key=lambda x: x.get("label", "")):
         if "error" in r:
             print(f"{r['label']:<20} {'ERROR':>12}")
             continue
-        static = f"{r.get('static_obj', 'N/A'):>12.0f}" if r.get('static_obj') else f"{'N/A':>12}"
-        st = f"{r.get('st_obj', 'N/A'):>12.0f}" if r.get('st_obj') else f"{'N/A':>12}"
-        t = f"{r.get('total_time', 0):>10.1f}"
-        print(f"{r['label']:<20} {static} {st} {t} {r.get('exp_dir', '')}")
+        static = f"{r['static_obj']:>12.0f}" if r.get('static_obj') else f"{'N/A':>12}"
+        mnp    = f"{r['mnp_obj']:>12.0f}"    if r.get('mnp_obj')    else f"{'N/A':>12}"
+        mrp    = f"{r['mrp_obj']:>12.0f}"    if r.get('mrp_obj')    else f"{'N/A':>12}"
+        t      = f"{r.get('total_time', 0):>10.1f}"
+        print(f"{r['label']:<20} {static} {mnp} {mrp} {t}  {r.get('exp_dir', '')}")
 
     # Save combined results
-    os.makedirs("experiments_parallel", exist_ok=True)
-    summary_path = os.path.join("experiments_parallel", "all_results.pkl")
+    os.makedirs("experiments_parallel", exist_ok=True) summary_path = os.path.join("experiments_parallel", "all_results.pkl")
     with open(summary_path, "wb") as f:
         pickle.dump(all_results, f)
     print(f"\nCombined results saved to {summary_path}")

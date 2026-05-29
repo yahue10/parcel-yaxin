@@ -108,15 +108,16 @@ class VehicleAllocationModel:
         return 1 / len(self.O)
 
     def generate_data(self):
-        # part fix with K = 2
+        # part fix with K = 3
         self.Ki = {i: self.K for i in self.N}
 
-        self.q = {0:10, 1:120}
-        self.beta = {0:500, 1:5000}
-        self.alpha = {(i, j, 0): 1 for i in self.N for j in self.N}
-        self.alpha.update({(i, j, 1): 5 for i in self.N for j in self.N})
-        self.gamma = {0:20, 1:200}
-        self.gamma_corr = {0:30, 1:250}
+        self.q = {0:650, 1:910, 2:910} # cargo bike ,e van, d van
+        self.beta = {0:44000, 1:49000, 2:51000}
+        self.alpha = {(i, j, 0): 10 for i in self.N for j in self.N}
+        self.alpha.update({(i, j, 1): 50 for i in self.N for j in self.N})
+        self.alpha.update({(i, j, 2): 50 for i in self.N for j in self.N})
+        self.gamma = {0: 3*650, 1: 3*910, 2: 3*910}
+        self.gamma_corr = {0: 3.3*650, 1: 3.3*910, 2: 3.3*910}
 
         # # Poisson demand with rough negative correlation across hubs
         # # Each hub has its own mean; a shared per-period shift pushes some hubs up and others down
@@ -132,14 +133,14 @@ class VehicleAllocationModel:
         #     mean_demand = {i: random.randint(200, 400) for i in self.N}
         #     self.d_pred = {(i, t): np.random.poisson(lam=mean_demand[i]) for i in self.N for t in self.T}
         
-        for i in self.N:
-            self.d_pred = {(i, t): random.randint(200+i*100, 400+i*100) for i in self.N for t in self.T}
+        mean = {i: random.randint(300000, 400000) for i in self.N}
+        self.d_pred = {(i, t): random.randint(mean[i]-75000, mean[i]+75000) for i in self.N for t in self.T}
 
         self.theta = {i: 0.3 for i in self.N}
         self.l = {(i, k): 1 for i in self.N for k in self.K}
-        self.g = {0:1, 1:0}
+        self.g = {0:1, 1:1, 2:0}
 
-        self.M1 = {0:80, 1:60}
+        self.M1 = {0:617, 1:617, 2:617}
         self.S = self.M1
 
 
@@ -195,9 +196,7 @@ class VehicleAllocationModel:
                 di = [self.d_pred[i, t] for t in self.T]
                 std_dev = np.std(di)
                 for t in self.T:
-                    noise = random.gauss(0, 1)  # Standard normal noise scaled by std_dev and direction
-                    print(f"Hub {i}, Time {t}: Predicted={self.d_pred[i, t]}, Noise={noise:.2f}, StdDev={std_dev:.2f}")
-                    noise = std_dev * noise
+                    noise = std_dev * random.gauss(0, 1)
                     perturbed = max(0, self.d_pred[i, t] + noise)
                     self.d_real[i, t, o] = perturbed
 
@@ -284,7 +283,7 @@ class VehicleAllocationModel:
 
 
 
-    def build_model_ST(self, env=None):
+    def build_model_MRP(self, env=None):
         """
         Le BON
         
@@ -382,12 +381,12 @@ class VehicleAllocationModel:
         # VARIABLES
         X = self.model.addVars(self.K, vtype=GRB.INTEGER, name="X")
         x = self.model.addVars(self.N, self.K, vtype=GRB.INTEGER, name="x")
-        s = self.model.addVars(self.N, self.K, self.T, vtype=GRB.INTEGER, name="s")
+        s = self.model.addVars(self.N, self.K, vtype=GRB.INTEGER, name="s")
 
         # OBJECTIVE
         self.model.setObjective(
             quicksum(self.beta[k] * X[k] for k in self.K) +
-            quicksum(self.gamma[k] * s[i, k, t] for i in self.N for k in self.K for t in self.T) ,
+            quicksum(self.gamma[k] * len(self.T) * s[i, k] for i in self.N for k in self.K) ,
             GRB.MINIMIZE
         )
 
@@ -401,32 +400,88 @@ class VehicleAllocationModel:
         # Demand coverage using d_max (static allocation must cover peak demand)
         for i in self.N:
             self.model.addConstr(
-                quicksum(self.q[k] * x[i, k] for k in self.Ki[i]) >= d_max[i],
+                quicksum(self.q[k] * (x[i, k]+s[i, k]) for k in self.Ki[i]) >= d_max[i],
                 name=f"peak_demand_{i}"
             )
             self.model.addConstr(
-                quicksum(self.g[k] * self.q[k] * x[i, k] for k in self.Ki[i]) >= self.theta[i] * d_max[i],
+                quicksum(self.g[k] * self.q[k] * (x[i, k]+s[i, k]) for k in self.Ki[i]) >= self.theta[i] * d_max[i],
                 name=f"green_peak_{i}"
             )
 
-        # # Per-period demand coverage (x + s must still cover each period)
-        # for i in self.N:
-        #     for t in self.T:
-        #         self.model.addConstr(
-        #             quicksum(self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.d_pred[i, t],
-        #             name=f"pred_demand_{i}_{t}"
-        #         )
-        #         self.model.addConstr(
-        #             quicksum(self.g[k] * self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.theta[i] * self.d_pred[i, t],
-        #             name=f"green_pred_{i}_{t}"
-        #         )
 
-    
+    def build_model_MNP(self, env=None):
+        """
+        MNP: static fleet allocation (x time-independent) with time-varying
+        subcontracting (s[i,k,t]) and corrective subcontracting (s_corr[i,k,t,o]),
+        but NO rebalancing transfers.
+        """
+        if env is not None:
+            self.model = Model(env=env, name="MNPVehicleAllocation")
+        else:
+            self.model = Model(name="MNPVehicleAllocation")
+
+        # VARIABLES
+        X = self.model.addVars(self.K, vtype=GRB.INTEGER, name="X")
+        x = self.model.addVars(self.N, self.K, vtype=GRB.INTEGER, name="x")
+        s = self.model.addVars(self.N, self.K, self.T, vtype=GRB.INTEGER, name="s")
+        s_corr = self.model.addVars(self.N, self.K, self.T, self.O, vtype=GRB.INTEGER, name="s_corr")
+
+        # OBJECTIVE
+        self.model.setObjective(
+            quicksum(self.beta[k] * X[k] for k in self.K) +
+            quicksum(self.gamma[k] * s[i, k, t] for i in self.N for k in self.K for t in self.T) +
+            quicksum(
+                self.p_omega(o) * (
+                    quicksum(self.gamma_corr[k] * s_corr[i, k, t, o]
+                            for i in self.N for k in self.K for t in self.T) 
+                ) for o in self.O
+            ),
+            GRB.MINIMIZE
+        )
+
+        # CONSTRAINTS
+
+        # Planification support
+        for k in self.K:
+            self.model.addConstr(X[k] <= self.S[k], name=f"stock_max_{k}")
+            self.model.addConstr(quicksum(x[i, k] for i in self.N) <= X[k], name=f"stock_sum_{k}")
+
+        # Predictive demand and green coverage (per period, like ST but no rebalancing)
+        for i in self.N:
+            for t in self.T:
+                self.model.addConstr(
+                    quicksum(self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.d_pred[i, t],
+                    name=f"pred_demand_{i}_{t}"
+                )
+                self.model.addConstr(
+                    quicksum(self.g[k] * self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.theta[i] * self.d_pred[i, t],
+                    name=f"green_pred_{i}_{t}"
+                )
+
+        # Real demand satisfaction and green constraint
+        for i in self.N:
+            for t in self.T:
+                for o in self.O:
+                    self.model.addConstr(
+                        quicksum(self.q[k] * (
+                            x[i, k] + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i])
+                         >= self.d_real[i, t, o],
+                        name=f"real_demand_{i}_{k}_{t}_{o}"
+                    )
+                    self.model.addConstr(
+                        quicksum(self.g[k] * self.q[k] * (
+                            x[i, k] + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i])
+                         >= self.theta[i] * self.d_real[i, t, o],
+                        name=f"green_real_{i}_{k}_{t}_{o}"
+                    )
         
 
     
         
-    def solve_ST(self, params=None, options=None):
+
+    
+        
+    def solve_MRP(self, params=None, options=None):
         """
         Build and solve the model.
 
@@ -439,7 +494,7 @@ class VehicleAllocationModel:
         else:
             env = Env()
 
-        self.build_model_ST(env=env)
+        self.build_model_MRP(env=env)
 
         if params:
             for name, value in params.items():
@@ -487,9 +542,37 @@ class VehicleAllocationModel:
         else:
             print(f"Optimization ended with status {self.model.status}")
 
-    
+    def solve_MNP(self, params=None, options=None):
+        """
+        Build and solve the MNP model (no rebalancing, static x, time-varying s).
 
-    
+        params : dict – Gurobi parameters, e.g.
+            {"TimeLimit": 500, "MIPGap": 0.01, "Threads": 4,
+             "OutputFlag": 0, "LogFile": "gurobi_log.txt"}
+        """
+        if options is not None:
+            env = Env(params=options)
+        else:
+            env = Env()
+        self.build_model_MNP(env=env)
+
+        if params:
+            for name, value in params.items():
+                self.model.setParam(name, value)
+
+        print('opt start')
+        self.model.optimize()
+
+        if self.model.status == GRB.OPTIMAL:
+            print(f"Optimal solution found: {self.model.ObjVal}")
+        elif self.model.status == GRB.TIME_LIMIT:
+            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+        elif self.model.status == GRB.INFEASIBLE:
+            print("Model is infeasible.")
+        else:
+            print(f"Optimization ended with status {self.model.status}")
+
+
     def _get_val(self, var_name):
         var = self.model.getVarByName(var_name)
         if var is None:
@@ -571,7 +654,7 @@ class VehicleAllocationModel:
     def rebalancing_plan(y, scenario, t_start, t_end):
         """
         Print the rebalancing plan from pre-extracted y dict.
-        y: dict with keys (i, j, k, t, o) from extract_ST()
+        y: dict with keys (i, j, k, t, o) from extract_MRP()
         """
         print(f"\nRebalancing Plan — Scenario {scenario}, periods [{t_start}, {t_end}]")
         print("=" * 60)
@@ -602,15 +685,17 @@ class VehicleAllocationModel:
 
 
 if __name__ == "__main__":
-    from plots import (extract_ST, extract_static, extract_ST_costs,
-                        plot_compare_subcontracting, plot_compare_resource, plot_compare_costs)
+    from plots import (extract_MRP, extract_static, extract_MNP,
+                        extract_MRP_costs, extract_MNP_costs,
+                        plot_compare_subcontracting, plot_compare_resource, plot_compare_costs,
+                        plot_compare_subcontracting_3way, plot_compare_resource_3way, plot_compare_costs_3way)
     options = {
         'WLSACCESSID': "30bca212-81df-41cc-a94e-a0269b14a3ec",
         'WLSSECRET': "215eee4c-3130-4a8b-8156-898521b84f16",
         'LICENSEID': 2738996,
         'WLSTOKENDURATION': 10 #mins
     }
-    N, K, T, O = 3, 2, 52, 100
+    N, K, T, O = 3, 3, 52, 100
     M = VehicleAllocationModel(N, K, T, O, seed=42)
 
     from datetime import datetime
@@ -620,30 +705,55 @@ if __name__ == "__main__":
 
     M.generate_data()
     M.save_instance(os.path.join(exp_dir, "instance.pkl"))
+
     start = time.time()
     M.solve_static(params={"TimeLimit": 3600, "MIPGap": 0.01}, options=options)
     end1 = time.time()
     static_x, static_s = extract_static(M)
     static_obj = M.model.ObjVal
-    
-    M.solve_ST(params={"TimeLimit": 3600, "MIPGap": 0.01}, options=options)
+    print(f'solve_static in {round(end1 - start, 2)} seconds')
+
+    M.solve_MNP(params={"TimeLimit": 3600, "MIPGap": 0.01}, options=options)
     end2 = time.time()
-    print(f'solve_static in {round(end2 - end1, 2)} seconds')
-    print(f'solve_ST in {round(end1 - start, 2)} seconds')
+    mnp_x, mnp_s = extract_MNP(M)
+    mnp_costs = extract_MNP_costs(M)
+    mnp_obj = M.model.ObjVal
+    print(f'solve_MNP in {round(end2 - end1, 2)} seconds')
+
+    M.solve_MRP(params={"TimeLimit": 3600, "MIPGap": 0.01}, options=options)
+    end3 = time.time()
     M.export_solution_summaryuiui(filename=os.path.join(exp_dir, "ui.txt"))
-    st_x, st_s, st_y = extract_ST(M)
-    st_costs = extract_ST_costs(M)
+    mrp_x, mrp_s, mrp_y = extract_MRP(M)
+    mrp_costs = extract_MRP_costs(M)
+    print(f'solve_MRP in {round(end3 - end2, 2)} seconds')
 
-    # Save ST rebalancing solution
-    with open(os.path.join(exp_dir, "st_y.pkl"), 'wb') as f:
-        pickle.dump(st_y, f)
+    # Save MRP rebalancing solution
+    with open(os.path.join(exp_dir, "mrp_y.pkl"), 'wb') as f:
+        pickle.dump(mrp_y, f)
 
-    plot_compare_subcontracting(M, st_s, static_s, output_dir=exp_dir)
-    plot_compare_resource(M, st_x, static_x, output_dir=exp_dir)
-    plot_compare_costs(M, st_costs, static_obj, output_dir=exp_dir)
+    # --- Fleet summary: sum_i x[i,k] for Static/MNP, X[k] for MRP ---
+    print("\n=== Fleet allocation per vehicle type ===")
+    print(f"{'Type':<6} {'Static sum_i x[i,k]':>22} {'MNP sum_i x[i,k]':>20} {'MRP X[k]':>12}")
+    print("-" * 64)
+    for k in M.K:
+        s_static = static_x[k].sum(axis=0)[0]   # x[i,k] constant over t
+        s_mnp    = mnp_x[k].sum(axis=0)[0]      # x[i,k] constant over t
+        X_mrp    = M._get_val(f"X[{k}]")        # fleet size variable
+        print(f"{k:<6} {s_static:>22.0f} {s_mnp:>20.0f} {X_mrp:>12.0f}")
+    print()
+
+    # 2-way comparisons (MRP vs Static, as before)
+    plot_compare_subcontracting(M, mrp_s, static_s, output_dir=exp_dir)
+    plot_compare_resource(M, mrp_x, static_x, output_dir=exp_dir)
+    plot_compare_costs(M, mrp_costs, static_obj, output_dir=exp_dir)
+
+    # 3-way comparisons (MRP vs MNP vs Static)
+    plot_compare_subcontracting_3way(M, mrp_s, mnp_s, static_s, output_dir=exp_dir)
+    plot_compare_resource_3way(M, mrp_x, mnp_x, static_x, output_dir=exp_dir)
+    plot_compare_costs_3way(M, mrp_costs, mnp_costs, static_obj, output_dir=exp_dir)
 
     # Example: rebalancing plan for scenario 4, periods 5 to 15
-    M.rebalancing_plan(st_y, scenario=4, t_start=5, t_end=15)
+    M.rebalancing_plan(mrp_y, scenario=4, t_start=5, t_end=15)
 
 
 
