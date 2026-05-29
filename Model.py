@@ -140,7 +140,7 @@ class VehicleAllocationModel:
         self.l = {(i, k): 1 for i in self.N for k in self.K}
         self.g = {0:1, 1:1, 2:0}
 
-        self.M1 = {0:617, 1:617, 2:617}
+        self.M1 = {0:6170, 1:6170, 2:6170}
         self.S = self.M1
 
 

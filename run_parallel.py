@@ -33,7 +33,7 @@ GUROBI_OPTIONS = None
 
 # Solver parameters passed to Gurobi
 SOLVER_PARAMS = {
-    "TimeLimit": 72000,
+    "TimeLimit": 108000,
     "MIPGap": 0.01,
     "Threads": 32,   # ~total_cores / MAX_WORKERS; sweet spot for Gurobi MIP
     "Presolve": 2,
@@ -44,8 +44,7 @@ MAX_WORKERS = 2
 # Define the instances to solve.
 # Each dict is passed to one worker. Vary N, O, seed, etc. as needed.
 INSTANCES = [
-    {"N": 20, "K": 3, "T": 52, "O": 100, "seed": 42,  "label": "xlarge_s42"},
-    {"N": 20, "K": 3, "T": 52, "O": 100, "seed": 123, "label": "xlarge_s123"},
+    {"N": 15, "K": 3, "T": 52, "O": 100, "seed": 42,  "label": "xlarge_s42"}
 ]
 
 
