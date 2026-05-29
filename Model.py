@@ -573,6 +573,18 @@ class VehicleAllocationModel:
             print(f"Optimization ended with status {self.model.status}")
 
 
+    def set_fleet_cap_from_static(self):
+        """
+        After solving the static model, read the optimal X[k] values,
+        compute Xstatic = sum_k X[k], then set M1[k] = S[k] = Xstatic / |K|
+        for every vehicle type k.  Call this before solving MNP or MRP.
+        """
+        xstatic = sum(self._get_val(f"X[{k}]") for k in self.K)
+        cap = int(round(xstatic / len(self.K)))
+        self.M1 = {k: cap for k in self.K}
+        self.S  = self.M1
+        return xstatic, cap
+
     def _get_val(self, var_name):
         var = self.model.getVarByName(var_name)
         if var is None:

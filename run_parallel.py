@@ -103,7 +103,11 @@ def solve_instance(instance_cfg):
         result["static_obj"] = static_obj
         result["static_gap"] = M.model.MIPGap
         result["static_time"] = t_static
-        print(f"[{label}] Static done in {t_static:.1f}s  obj={static_obj:.0f}")
+        xstatic, cap = M.set_fleet_cap_from_static()
+        result["xstatic"] = xstatic
+        result["fleet_cap_per_type"] = cap
+        print(f"[{label}] Static done in {t_static:.1f}s  obj={static_obj:.0f}  "
+              f"Xstatic={xstatic:.0f}  cap/type={cap}")
     else:
         result["static_obj"] = None
         result["static_time"] = t_static
