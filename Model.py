@@ -197,7 +197,7 @@ class VehicleAllocationModel:
                 std_dev = np.std(di)
                 for t in self.T:
                     noise = std_dev * random.gauss(0, 1)
-                    perturbed = max(0, self.d_pred[i, t] + noise)
+                    perturbed = int(round(max(0, self.d_pred[i, t] + noise)))
                     self.d_real[i, t, o] = perturbed
 
 

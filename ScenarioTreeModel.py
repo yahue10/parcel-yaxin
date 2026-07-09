@@ -115,11 +115,10 @@ class ScenarioTree:
 
 
 def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_season=13,
-                             base_mean_range=(200, 400), season_drift=0.15,
+                             base_mean_range=(20000, 40000), season_drift=0.15,
                              noise_frac=0.05, seed=42):
     """
-    Fabricates a small scenario tree so the model can be built/solved before
-    real scenario data exists. Demand per node is a random-walk perturbation
+    Demand per node is a random-walk perturbation
     of the parent's demand level; branching is uniform (equal child
     probabilities) at every stage.
     """
@@ -143,7 +142,7 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
                 level = {i: max(0.0, parent_level[i] * (1 + rng.uniform(-season_drift, season_drift)))
                          for i in N}
                 demand = {
-                    (i, t): max(0.0, level[i] + rng.gauss(0, noise_frac * level[i]))
+                    (i, t): int(round(max(0.0, level[i] + rng.gauss(0, noise_frac * level[i]))))
                     for i in N for t in range(1, weeks_per_season + 1)
                 }
                 tree.add_child(node_id, parent_id, stage=b, prob=child_prob, demand=demand)

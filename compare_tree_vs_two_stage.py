@@ -100,35 +100,70 @@ def build_d_pred(d_real, leaf_prob, N, total_weeks):
 
 
 # ---------------------------------------------------------------------------
-# Model builders (shared cost parameters, same values in both files)
+# Cost/capacity parameters — single source of truth for BOTH models
 # ---------------------------------------------------------------------------
+#
+# The tree model and the two-stage model must price vehicles identically for
+# the comparison to mean anything, so both builders below pull from this one
+# function instead of hardcoding their own copies. Pass `overrides` (e.g. from
+# an INSTANCES dict's "costs" key) to change q/beta/alpha/gamma/gamma_corr/
+# theta/S/g for a given run; each key you supply replaces that parameter's
+# dict wholesale (not merged per vehicle type).
 
-def build_tree_model(N, K, tree, seed=42):
-    m = ScenarioTreeVehicleAllocationModel(N, K, tree, seed=seed)
-    m.generate_costs()
+def build_cost_params(N, K, overrides=None):
+    q = {0: 720, 1: 4000, 2: 4000}                       # cargo bike, e-van, d-van
+    beta = {0: 10538, 1: 40000, 2: 42000}
+    alpha = {(i, j, 0): 10 for i in N for j in N}
+    alpha.update({(i, j, 1): 50 for i in N for j in N})
+    alpha.update({(i, j, 2): 50 for i in N for j in N})
+    # gamma = {k: 3 * v for k, v in q.items()}
+    # gamma_corr = {k: 5 * v for k, v in q.items()}
+    gamma = {0: 2000, 1: 5000, 2: 5000} 
+    gamma_corr = {k: 1.5*v for k, v in gamma.items()}
+    theta = {i: 0.3 for i in N}
+    S = {0: 20, 1: 20, 2: 20}
+    g = {0: 1, 1: 1, 2: 0}                              # 1 = green vehicle type
+
+    params = dict(q=q, beta=beta, alpha=alpha, gamma=gamma, gamma_corr=gamma_corr,
+                   theta=theta, S=S, g=g)
+    if overrides:
+        params.update(overrides)
+    return params
+
+
+def _apply_cost_params(m, params):
+    m.q = params["q"]
+    m.beta = params["beta"]
+    m.alpha = params["alpha"]
+    m.gamma = params["gamma"]
+    m.gamma_corr = params["gamma_corr"]
+    m.theta = params["theta"]
+    m.S = params["S"]
+    m.g = params["g"]
     return m
 
 
-def build_two_stage_model(N, K, tree, seed=42):
+# ---------------------------------------------------------------------------
+# Model builders
+# ---------------------------------------------------------------------------
+
+def build_tree_model(N, K, tree, seed=42, cost_overrides=None):
+    m = ScenarioTreeVehicleAllocationModel(N, K, tree, seed=seed)
+    params = build_cost_params(N, K, cost_overrides)
+    _apply_cost_params(m, params)
+    m.K_green = [k for k in m.K if params["g"].get(k, 0) == 1]
+    return m
+
+
+def build_two_stage_model(N, K, tree, seed=42, cost_overrides=None):
     d_real, leaf_prob, total_weeks = build_full_horizon_scenarios(tree, N)
     d_pred = build_d_pred(d_real, leaf_prob, N, total_weeks)
 
     m = VehicleAllocationModel(N=len(N), K=len(K), T=total_weeks, O=len(leaf_prob), seed=seed)
-
-    # Same cost parameters as ScenarioTreeVehicleAllocationModel.generate_costs()
     m.Ki = {i: m.K for i in m.N}
-    m.q = {0: 650, 1: 910, 2: 910}
-    m.beta = {0: 44000, 1: 49000, 2: 51000}
-    m.alpha = {(i, j, 0): 10 for i in m.N for j in m.N}
-    m.alpha.update({(i, j, 1): 50 for i in m.N for j in m.N})
-    m.alpha.update({(i, j, 2): 50 for i in m.N for j in m.N})
-    m.gamma = {0: 3 * 650, 1: 3 * 910, 2: 3 * 910}
-    m.gamma_corr = {0: 3.3 * 650, 1: 3.3 * 910, 2: 3.3 * 910}
-    m.theta = {i: 0.3 for i in m.N}
+    _apply_cost_params(m, build_cost_params(N, K, cost_overrides))
     m.l = {(i, k): 1 for i in m.N for k in m.K}
-    m.g = {0: 1, 1: 1, 2: 0}
-    m.M1 = {0: 6170, 1: 6170, 2: 6170}
-    m.S = m.M1
+    m.M1 = m.S
 
     m.d_pred = d_pred
     m.d_real = d_real
@@ -227,7 +262,8 @@ def report(tree_model, two_stage_model, N, K):
 # ---------------------------------------------------------------------------
 
 def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
-            n_hubs=3, n_types=3, solver_params=None, seed=42):
+            n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
+            make_plots=False, plot_dir="compare_plots"):
     N = list(range(n_hubs))
     K = list(range(n_types))
     solver_params = solver_params or {"TimeLimit": 600, "MIPGap": 0.01, "OutputFlag": 1}
@@ -241,18 +277,26 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
           f"branching {branching} -> {n_leaves} full-horizon paths ({total_weeks} weeks total)")
 
     print("\n--- Solving multistage scenario-tree model ---")
-    tree_model = build_tree_model(N, K, tree, seed=seed)
+    tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
     tree_model.solve(params=solver_params)
 
     print("\n--- Solving two-stage (MRP) model on the same scenario paths ---")
-    two_stage_model, leaf_prob, _ = build_two_stage_model(N, K, tree, seed=seed)
+    two_stage_model, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
     two_stage_model.solve_MRP(params=solver_params)
 
     report(tree_model, two_stage_model, N, K)
+
+    if make_plots:
+        import matplotlib
+        matplotlib.use("Agg")
+        from plots_tree_vs_two_stage import plot_all_comparisons
+        plot_all_comparisons(tree_model, two_stage_model, N, K, total_weeks, output_dir=plot_dir)
+
     return tree_model, two_stage_model
 
 
 if __name__ == "__main__":
-    compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
+    compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=3,
             n_hubs=3, n_types=3,
-            solver_params={"TimeLimit": 600, "MIPGap": 0.01})
+            solver_params={"TimeLimit": 600, "MIPGap": 0.01},
+            make_plots=True, plot_dir="compare_plots")

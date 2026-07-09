@@ -1,0 +1,12 @@
+Multistage (Tree) vs Two-Stage (MRP) — Cost Summary
+=======================================================
+
+Multistage objective : 769,794.42
+Two-stage objective  : 815,009.60
+VMS (two-stage - tree): 45,215.19 (+5.87%)
+
+Component                                 Tree         Two-stage
+Purchase                            738,538.00        770,538.00
+Planned subcontracting                7,800.00              0.00
+Corrective subcontracting            23,091.36         44,471.60
+Rebalancing                             365.06              0.00
