@@ -285,25 +285,42 @@ class VehicleAllocationModel:
 
     def build_model_MRP(self, env=None):
         """
-        Le BON
-        
+        Two-stage MRP: v[i,k] (fleet acquired + positioned at hub i, first
+        stage) and s[i,k,b] (planned subcontracting, first stage, one value
+        per SEASON b -- not per week) are fixed before any scenario is known.
+        x[i,k,t,o] (fleet position), s_corr[i,k,t,o] (corrective
+        subcontracting) and y[i,j,k,t,o] (rebalancing) are second-stage
+        recourse, adapting to the realized scenario o.
+
+        Season structure: self.B (list of season ids) / self.season_of_week
+        (dict t -> b) are optional -- if unset, every week is its own season
+        (b(t) = t), exactly reproducing the old per-week s[i,k,t] granularity
+        for callers that don't have a real season concept (e.g. run_parallel.py's
+        generate_data() path). compare_tree_vs_two_stage.build_two_stage_model()
+        attaches the tree's real season boundaries.
         """
         if env is not None:
             self.model = Model(env=env, name="DynamicVehicleAllocation")
         else:
             self.model = Model(name="DynamicVehicleAllocation")
 
+        B = getattr(self, "B", None) or list(self.T)
+        season_of_week = getattr(self, "season_of_week", None) or {t: t for t in self.T}
+        weeks_in_season = {b: [t for t in self.T if season_of_week[t] == b] for b in B}
+
         # VARIABLES
+        v = self.model.addVars(self.N, self.K, vtype=GRB.INTEGER, name="v")
         X = self.model.addVars(self.K, vtype=GRB.INTEGER, name="X")
-        x = self.model.addVars(self.N, self.K, self.T, vtype=GRB.INTEGER, name="x")
-        s = self.model.addVars(self.N, self.K, self.T, vtype=GRB.INTEGER, name="s")
+        x = self.model.addVars(self.N, self.K, self.T, self.O, vtype=GRB.INTEGER, name="x")
+        s = self.model.addVars(self.N, self.K, B, vtype=GRB.INTEGER, name="s")
         s_corr = self.model.addVars(self.N, self.K, self.T, self.O, vtype=GRB.INTEGER, name="s_corr")
         y = self.model.addVars(self.N, self.N, self.K, self.T, self.O, vtype=GRB.INTEGER, name="y")
 
         # OBJECTIVE
         self.model.setObjective(
             quicksum(self.beta[k] * X[k] for k in self.K) +
-            quicksum(self.gamma[k] * s[i, k, t] for i in self.N for k in self.K for t in self.T) +
+            quicksum(self.gamma[k] * s[i, k, b] * len(weeks_in_season[b])
+                     for i in self.N for k in self.K for b in B) +
             quicksum(
                 self.p_omega(o) * (
                     quicksum(self.gamma_corr[k] * s_corr[i, k, t, o]
@@ -317,43 +334,38 @@ class VehicleAllocationModel:
 
         # CONSTRAINTS
 
-        # Planification support
+        # Fleet acquisition + positioning (first stage)
         for k in self.K:
+            self.model.addConstr(X[k] == quicksum(v[i, k] for i in self.N), name=f"stock_def_{k}")
             self.model.addConstr(X[k] <= self.S[k], name=f"stock_max_{k}")
-            for t in self.T:
-                self.model.addConstr(quicksum(x[i, k, t] for i in self.N) <= X[k], name=f"stock_sum_{k}_{t}")
 
-        # Predictive demand and green coverage
+        # Initial fleet position: x[i,k,t=first,o] == v[i,k], for every scenario
+        t0 = self.T[0]
         for i in self.N:
-            for t in self.T:
-                self.model.addConstr(
-                    quicksum(self.q[k] * (x[i, k, t] + s[i, k, t]) for k in self.Ki[i]) >= self.d_pred[i, t],
-                    name=f"pred_demand_{i}_{t}"
-                )
-                self.model.addConstr(
-                    quicksum(self.g[k] * self.q[k] * (x[i, k, t] + s[i, k, t]) for k in self.Ki[i]) >= self.theta[i] * self.d_pred[i, t],
-                    name=f"green_pred_{i}_{t}"
-                )
+            for k in self.K:
+                for o in self.O:
+                    self.model.addConstr(x[i, k, t0, o] == v[i, k], name=f"init_{i}_{k}_{o}")
 
         # Real demand satisfaction and green constraint
+        #
+        # No separate inflow/outflow term here: x[i,k,t,o] already carries
+        # that period's net rebalancing per type via the precedence
+        # constraint below. Adding a flow term again on top of x would
+        # double-count it -- see the tree model's demand constraint, which
+        # has no separate flow term for the same reason.
         for i in self.N:
             for t in self.T:
+                b = season_of_week[t]
                 for o in self.O:
-                    if t == 0:
-                        inflow_k = 0
-                        outflow_k = 0
-                    else:
-                        inflow_k = quicksum(self.q[k]* y[j, i, k, t - 1, o] for j in self.N for k in self.Ki[i])
-                        outflow_k = quicksum(self.q[k]*y[i, j, k, t - 1, o] for j in self.N for k in self.Ki[i])
                     self.model.addConstr(
                         quicksum(self.q[k] * (
-                            x[i, k, t]  + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i]) + inflow_k - outflow_k
+                            x[i, k, t, o] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
                          >= self.d_real[i, t, o],
                         name=f"real_demand_{i}_{k}_{t}_{o}"
                     )
                     self.model.addConstr(
                         quicksum(self.g[k] * self.q[k] * (
-                            x[i, k, t]+ s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i]) + inflow_k - outflow_k 
+                            x[i, k, t, o] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
                          >= self.theta[i] * self.d_real[i, t, o],
                         name=f"green_real_{i}_{k}_{t}_{o}"
                     )
@@ -362,11 +374,12 @@ class VehicleAllocationModel:
         for i in self.N:
             for k in self.K:
                 for t in self.T:
-                    if t>0:
+                    if t > t0:
                         for o in self.O:
                             inflow_k = quicksum(y[j, i, k, t - 1, o] for j in self.N)
                             outflow_k = quicksum(y[i, j, k, t - 1, o] for j in self.N)
-                            self.model.addConstr(x[i, k, t] == x[i, k, t-1] + inflow_k - outflow_k, name="precedence")
+                            self.model.addConstr(x[i, k, t, o] == x[i, k, t - 1, o] + inflow_k - outflow_k,
+                                                  name="precedence")
 
     def build_model_static(self, env=None):
 
@@ -411,29 +424,39 @@ class VehicleAllocationModel:
 
     def build_model_MNP(self, env=None):
         """
-        MNP: static fleet allocation (x time-independent) with time-varying
-        subcontracting (s[i,k,t]) and corrective subcontracting (s_corr[i,k,t,o]),
-        but NO rebalancing transfers.
+        MNP: static fleet allocation (x time- and scenario-independent, since
+        there's no rebalancing lever to adapt it with) with seasonal planned
+        subcontracting (s[i,k,b], one value per season b, not per week) and
+        corrective subcontracting (s_corr[i,k,t,o]).
+
+        Season structure: self.B / self.season_of_week, same optional
+        attributes as build_model_MRP (defaults to one season per week if
+        unset -- see that method's docstring).
         """
         if env is not None:
             self.model = Model(env=env, name="MNPVehicleAllocation")
         else:
             self.model = Model(name="MNPVehicleAllocation")
 
+        B = getattr(self, "B", None) or list(self.T)
+        season_of_week = getattr(self, "season_of_week", None) or {t: t for t in self.T}
+        weeks_in_season = {b: [t for t in self.T if season_of_week[t] == b] for b in B}
+
         # VARIABLES
         X = self.model.addVars(self.K, vtype=GRB.INTEGER, name="X")
         x = self.model.addVars(self.N, self.K, vtype=GRB.INTEGER, name="x")
-        s = self.model.addVars(self.N, self.K, self.T, vtype=GRB.INTEGER, name="s")
+        s = self.model.addVars(self.N, self.K, B, vtype=GRB.INTEGER, name="s")
         s_corr = self.model.addVars(self.N, self.K, self.T, self.O, vtype=GRB.INTEGER, name="s_corr")
 
         # OBJECTIVE
         self.model.setObjective(
             quicksum(self.beta[k] * X[k] for k in self.K) +
-            quicksum(self.gamma[k] * s[i, k, t] for i in self.N for k in self.K for t in self.T) +
+            quicksum(self.gamma[k] * s[i, k, b] * len(weeks_in_season[b])
+                     for i in self.N for k in self.K for b in B) +
             quicksum(
                 self.p_omega(o) * (
                     quicksum(self.gamma_corr[k] * s_corr[i, k, t, o]
-                            for i in self.N for k in self.K for t in self.T) 
+                            for i in self.N for k in self.K for t in self.T)
                 ) for o in self.O
             ),
             GRB.MINIMIZE
@@ -446,35 +469,24 @@ class VehicleAllocationModel:
             self.model.addConstr(X[k] <= self.S[k], name=f"stock_max_{k}")
             self.model.addConstr(quicksum(x[i, k] for i in self.N) <= X[k], name=f"stock_sum_{k}")
 
-        # Predictive demand and green coverage (per period, like ST but no rebalancing)
-        for i in self.N:
-            for t in self.T:
-                self.model.addConstr(
-                    quicksum(self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.d_pred[i, t],
-                    name=f"pred_demand_{i}_{t}"
-                )
-                self.model.addConstr(
-                    quicksum(self.g[k] * self.q[k] * (x[i, k] + s[i, k, t]) for k in self.Ki[i]) >= self.theta[i] * self.d_pred[i, t],
-                    name=f"green_pred_{i}_{t}"
-                )
-
         # Real demand satisfaction and green constraint
         for i in self.N:
             for t in self.T:
+                b = season_of_week[t]
                 for o in self.O:
                     self.model.addConstr(
                         quicksum(self.q[k] * (
-                            x[i, k] + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i])
+                            x[i, k] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
                          >= self.d_real[i, t, o],
                         name=f"real_demand_{i}_{k}_{t}_{o}"
                     )
                     self.model.addConstr(
                         quicksum(self.g[k] * self.q[k] * (
-                            x[i, k] + s[i, k, t] + s_corr[i, k, t, o]) for k in self.Ki[i])
+                            x[i, k] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
                          >= self.theta[i] * self.d_real[i, t, o],
                         name=f"green_real_{i}_{k}_{t}_{o}"
                     )
-        
+
 
     
         
@@ -610,23 +622,25 @@ class VehicleAllocationModel:
                 write(f"  Type {k}: {val:.0f}")
             write("")
 
-            write("🔹 Allocation per Hub and Time (x[i,k,t]):")
+            write("🔹 Allocation per Hub, Time and Scenario (x[i,k,t,o]):")
             for t in self.T:
                 for k in self.K:
                     for i in self.N:
-                        val = self._get_val(f"x[{i},{k},{t}]")
-                        if val > 0.1:
-                            write(f"  Hub {i}, Type {k}, Time {t}: {val:.0f}")
+                        for o in self.O:
+                            val = self._get_val(f"x[{i},{k},{t},{o}]")
+                            if val > 0.1:
+                                write(f"  Hub {i}, Type {k}, Time {t}, Scenario {o}: {val:.0f}")
                 write("\n")
             write("")
 
-            write("🔹 Anticipated Subcontracting (s[i,k,t]):")
-            for t in self.T:
+            B = getattr(self, "B", None) or list(self.T)
+            write("🔹 Anticipated Subcontracting (s[i,k,b], one value per season):")
+            for b in B:
                 for k in self.K:
                     for i in self.N:
-                        val = self._get_val(f"s[{i},{k},{t}]")
+                        val = self._get_val(f"s[{i},{k},{b}]")
                         if val > 0.1:
-                            write(f"  Hub {i}, Type {k}, Time {t}: {val:.0f}")
+                            write(f"  Hub {i}, Type {k}, Season {b}: {val:.0f}")
                 write("\n")
             write("")
 
@@ -701,13 +715,14 @@ if __name__ == "__main__":
                         extract_MRP_costs, extract_MNP_costs,
                         plot_compare_subcontracting, plot_compare_resource, plot_compare_costs,
                         plot_compare_subcontracting_3way, plot_compare_resource_3way, plot_compare_costs_3way)
-    options = {
-        'WLSACCESSID': "30bca212-81df-41cc-a94e-a0269b14a3ec",
-        'WLSSECRET': "215eee4c-3130-4a8b-8156-898521b84f16",
-        'LICENSEID': 2738996,
-        'WLSTOKENDURATION': 10 #mins
-    }
-    N, K, T, O = 3, 3, 52, 100
+    # options = {
+    #     'WLSACCESSID': "30bca212-81df-41cc-a94e-a0269b14a3ec",
+    #     'WLSSECRET': "215eee4c-3130-4a8b-8156-898521b84f16",
+    #     'LICENSEID': 2738996,
+    #     'WLSTOKENDURATION': 10 #mins
+    # }
+    options = None
+    N, K, T, O = 3, 3, 52, 50
     M = VehicleAllocationModel(N, K, T, O, seed=42)
 
     from datetime import datetime
@@ -766,14 +781,4 @@ if __name__ == "__main__":
 
     # Example: rebalancing plan for scenario 4, periods 5 to 15
     M.rebalancing_plan(mrp_y, scenario=4, t_start=5, t_end=15)
-
-
-
-
-
-
-    # by maher
-    #M.plot_solution_map(scenario=0)
-    #M.plot_rebalancing_solution(scenario=0)
-    #plot_solution_graph_from_file(filename="bismillah.txt",N=5,T=5)
 

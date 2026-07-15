@@ -25,6 +25,7 @@ that's the block actually decided at n. If every season really is a fixed
 
 from gurobipy import Model, GRB, Env
 import random
+import numpy as np
 
 
 # ---------------------------------------------------------------------------
@@ -116,13 +117,57 @@ class ScenarioTree:
 
 def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_season=13,
                              base_mean_range=(20000, 40000), season_drift=0.15,
-                             noise_frac=0.05, seed=42):
+                             noise_frac=0.05, hub_correlation=None,
+                             sibling_drift_correlation=1, seed=42):
     """
-    Demand per node is a random-walk perturbation
-    of the parent's demand level; branching is uniform (equal child
-    probabilities) at every stage.
+    Demand per node is a random-walk perturbation of the parent's demand
+    level; branching is uniform (equal child probabilities) at every stage.
+
+    hub_correlation : optional len(N) x len(N) correlation matrix (nested
+        list/array, indexed by position in N, symmetric, unit diagonal).
+        None (default) means hubs move independently, same as before. E.g.
+        for N = [0, 1, 2] with hub 0 and 1 strongly opposed and hub 2
+        independent of both:
+            [[ 1.0, -0.8,  0.0],
+             [-0.8,  1.0,  0.0],
+             [ 0.0,  0.0,  1.0]]
+        Applies to both the season-to-season drift and the within-season
+        weekly noise (see module notes). Both shocks are drawn from a
+        correlated multivariate normal rather than the previous independent
+        uniform/gauss draws, so season_drift/noise_frac are now read as a
+        standard-deviation scale rather than a uniform half-width.
+
+    sibling_drift_correlation : float in [0, 1], default 0.0 (no change from
+        previous behavior). Controls how much the SEASON-DRIFT shock (the
+        shock that sets a child's season-level demand relative to its
+        parent — not the within-season weekly noise) is shared across
+        siblings, i.e. children of the same parent. Each child's drift shock
+        is built as sqrt(rho)*shared + sqrt(1-rho)*own, where `shared` is
+        drawn once per parent and `own` is drawn independently per child (both
+        already hub-correlated via hub_correlation). rho=0: siblings drift
+        fully independently (today's behavior) — one may trend up while
+        another trends down. rho=1: siblings get the identical drift shock
+        (same direction AND magnitude that season; they only start to differ
+        via the still-independent weekly noise). Values in between make
+        siblings *tend* to move the same direction without forcing it.
     """
     rng = random.Random(seed)
+    rng_np = np.random.default_rng(seed)
+
+    n = len(N)
+    corr = np.eye(n) if hub_correlation is None else np.asarray(hub_correlation, dtype=float)
+    try:
+        chol = np.linalg.cholesky(corr)
+    except np.linalg.LinAlgError:
+        raise ValueError("hub_correlation must be a valid (symmetric, positive-semidefinite) "
+                          "correlation matrix")
+
+    def correlated_shocks():
+        """One correlated standard-normal shock per hub, in N's order."""
+        return chol @ rng_np.standard_normal(n)
+
+    rho = sibling_drift_correlation
+
     e = {b: weeks_per_season for b in seasons}
     tree = ScenarioTree(e)
     root = tree.add_root()
@@ -136,15 +181,20 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
         for parent_id, parent_level in frontier:
             parent = tree.nodes[parent_id]
             child_prob = parent.prob / branching
+            shared_drift = correlated_shocks() if rho > 0 else None
             for _ in range(branching):
                 node_id = next_id
                 next_id += 1
-                level = {i: max(0.0, parent_level[i] * (1 + rng.uniform(-season_drift, season_drift)))
-                         for i in N}
-                demand = {
-                    (i, t): int(round(max(0.0, level[i] + rng.gauss(0, noise_frac * level[i]))))
-                    for i in N for t in range(1, weeks_per_season + 1)
-                }
+                own_drift = correlated_shocks()
+                z_drift = (own_drift if rho <= 0
+                           else np.sqrt(rho) * shared_drift + np.sqrt(1 - rho) * own_drift)
+                level = {i: max(0.0, parent_level[i] * (1 + season_drift * z_drift[idx]))
+                         for idx, i in enumerate(N)}
+                demand = {}
+                for t in range(1, weeks_per_season + 1):
+                    z_noise = correlated_shocks()
+                    for idx, i in enumerate(N):
+                        demand[i, t] = int(round(max(0.0, level[i] + noise_frac * level[i] * z_noise[idx])))
                 tree.add_child(node_id, parent_id, stage=b, prob=child_prob, demand=demand)
                 new_frontier.append((node_id, level))
         frontier = new_frontier
@@ -316,6 +366,7 @@ class ScenarioTreeVehicleAllocationModel:
 if __name__ == "__main__":
     N = list(range(3))
     K = list(range(3))
+
 
     tree = build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_season=13, seed=42)
     tree.validate(N)

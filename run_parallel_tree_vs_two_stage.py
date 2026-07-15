@@ -1,22 +1,29 @@
 """
-run_parallel_tree_vs_two_stage.py — Batch VMS comparison across multiple instances
-====================================================================================
+run_parallel_tree_vs_two_stage.py — Batch comparison across multiple instances
+==================================================================================
 
-Runs compare_tree_vs_two_stage.py's multistage-vs-two-stage comparison across
-several scenario-tree configurations concurrently — same pattern as
-run_parallel.py.
+Runs compare_tree_vs_two_stage.py's multistage-vs-Static-vs-MNP-vs-MRP
+comparison across several scenario-tree configurations concurrently — same
+pattern as run_parallel.py.
 
 Each worker builds its OWN scenario tree and derives the flattened
-full-horizon scenarios for the two-stage model from that same tree (mirroring
-where run_parallel.py calls M.generate_data() inside solve_instance): the
-instance and its scenario set live entirely inside the worker, alongside its
-own Gurobi environment, never shared across processes.
+full-horizon scenarios for the Static/MNP/MRP models from that same tree
+(mirroring where run_parallel.py calls M.generate_data() inside
+solve_instance): the instance and its scenario set live entirely inside the
+worker, alongside its own Gurobi environment, never shared across processes.
+Static/MNP/MRP are solved sequentially on one shared VehicleAllocationModel
+instance, with results extracted into plain dicts immediately after each
+solve (see compare_tree_vs_two_stage._extract_two_stage_result) since each
+solve_*() call overwrites the instance's underlying Gurobi model.
 
 You can configure:
     - INSTANCES: list of dicts defining each tree configuration
       (seasons, weeks_per_season, branching, n_hubs, n_types, seed, label,
-      and optionally "costs" — overrides for q/beta/alpha/gamma/gamma_corr/
-      theta/S/g, see compare_tree_vs_two_stage.build_cost_params)
+      optionally "costs" — overrides for q/beta/alpha/gamma/gamma_corr/
+      theta/S/g, see compare_tree_vs_two_stage.build_cost_params, and
+      optionally "hub_correlation" — an n_hubs x n_hubs correlation matrix
+      applied to both the season-drift and weekly-noise demand shocks, see
+      ScenarioTreeModel.build_toy_scenario_tree)
     - MAX_WORKERS: number of parallel processes (defaults to CPU count)
     - GUROBI_OPTIONS: WLS license credentials shared across all workers
     - SOLVER_PARAMS: Gurobi solver parameters (TimeLimit, MIPGap, Threads, ...)
@@ -38,13 +45,13 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 3600,
+    "TimeLimit": 14400,
     "MIPGap": 0.01,
     "Threads": 8,
     "Presolve": 2,
 }
 
-MAX_WORKERS = 2
+MAX_WORKERS = 6
 
 # Define the tree configurations to compare.
 # Each dict is passed to one worker. Vary branching, weeks_per_season, seed, etc.
@@ -52,11 +59,13 @@ MAX_WORKERS = 2
 # instance (see compare_tree_vs_two_stage.build_cost_params) — each key you
 # supply replaces that parameter's dict wholesale, e.g. "costs": {"S": {0: 3000,
 # 1: 3000, 2: 3000}} to test a tighter purchase cap. Omit "costs" to use defaults.
+# Optional "hub_correlation" key: an n_hubs x n_hubs correlation matrix (symmetric,
+# unit diagonal) applied to both season-drift and weekly-noise demand shocks, e.g.
+# "hub_correlation": [[1, -0.8, 0], [-0.8, 1, 0], [0, 0, 1]] for hubs 0/1 strongly
+# opposed and hub 2 independent. Omit for independent hubs (today's default).
 INSTANCES = [
     {"label": "b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 3, "n_types": 3, "seed": 42},
-    {"label": "b2_seed7", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 3, "n_types": 3, "seed": 7},
+     "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 42},
 ]
 
 
@@ -66,17 +75,26 @@ INSTANCES = [
 
 def solve_instance(instance_cfg):
     """
-    Build one scenario tree + its derived two-stage scenario set, solve both
-    the multistage and two-stage models, and return a results dict.
-    This function runs in its own process with its own Gurobi environment.
+    Build one scenario tree + its derived two-stage scenario set, solve the
+    multistage tree model and the Static / MNP / MRP models, and return a
+    results dict. This function runs in its own process with its own Gurobi
+    environment.
     """
     import matplotlib
     matplotlib.use("Agg")
 
     from ScenarioTreeModel import build_toy_scenario_tree
     from compare_tree_vs_two_stage import (
-        build_tree_model, build_two_stage_model,
-        tree_cost_breakdown, two_stage_cost_breakdown,
+        build_tree_model, build_two_stage_model, build_full_horizon_scenarios,
+        save_flat_scenarios, save_scenario_quantities_by_type, save_all_variables,
+        static_cost_breakdown, mnp_cost_breakdown, mrp_cost_breakdown,
+        static_scenario_cost_breakdown, mnp_scenario_cost_breakdown, mrp_scenario_cost_breakdown,
+        static_scenario_subcontracting_quantities, mnp_scenario_subcontracting_quantities,
+        mrp_scenario_subcontracting_quantities,
+        static_green_coverage_ratios, mnp_green_coverage_ratios, mrp_green_coverage_ratios,
+        static_scenario_quantities_by_type, mnp_scenario_quantities_by_type,
+        mrp_scenario_quantities_by_type,
+        _extract_two_stage_result, _tree_result, _flat_resource, _mrp_resource,
     )
     from plots_tree_vs_two_stage import plot_all_comparisons
 
@@ -86,6 +104,7 @@ def solve_instance(instance_cfg):
     branching = instance_cfg["branching"]
     seed = instance_cfg["seed"]
     cost_overrides = instance_cfg.get("costs")
+    hub_correlation = instance_cfg.get("hub_correlation")
     N = list(range(instance_cfg["n_hubs"]))
     K = list(range(instance_cfg["n_types"]))
 
@@ -98,10 +117,11 @@ def solve_instance(instance_cfg):
 
     # --- Build the instance: the scenario tree, then the scenarios derived from it ---
     tree = build_toy_scenario_tree(N, seasons=seasons, branching=branching,
-                                    weeks_per_season=weeks_per_season, seed=seed)
+                                    weeks_per_season=weeks_per_season,
+                                    hub_correlation=hub_correlation, seed=seed)
     tree.validate(N)
 
-    result = {
+    meta = {
         "label": label, "seasons": seasons, "weeks_per_season": weeks_per_season,
         "branching": branching, "n_hubs": len(N), "n_types": len(K),
         "seed": seed, "exp_dir": exp_dir,
@@ -112,45 +132,75 @@ def solve_instance(instance_cfg):
     tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
     tree_model.solve(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
     t_tree = time.time() - t0
+    print(f"[{label}] Tree model done in {t_tree:.1f}s "
+          f"obj={tree_model.model.ObjVal if tree_model.model.status in (2, 9) else 'N/A'}")
+    save_all_variables(tree_model, os.path.join(exp_dir, "variables", "tree.pkl"))
 
-    if tree_model.model.status in (2, 9):
-        result["tree_obj"] = tree_model.model.ObjVal
-        result["tree_gap"] = tree_model.model.MIPGap
-        result["tree_costs"] = tree_cost_breakdown(tree_model)
-        print(f"[{label}] Tree model done in {t_tree:.1f}s  obj={result['tree_obj']:.0f}")
-    else:
-        result["tree_obj"] = None
-        print(f"[{label}] Tree model ended with status {tree_model.model.status}")
-    result["tree_time"] = t_tree
+    # --- Static / MNP / MRP, sequentially on the SAME shared model instance ---
+    m, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
 
-    # --- Two-stage (MRP) model, built on the SAME tree's flattened scenarios ---
     t0 = time.time()
-    two_stage_model, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
-    two_stage_model.solve_MRP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
-    t_two_stage = time.time() - t0
+    m.solve_static(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    static_result = _extract_two_stage_result(
+        m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
+        static_scenario_subcontracting_quantities, static_green_coverage_ratios,
+        static_scenario_quantities_by_type)
+    save_all_variables(m, os.path.join(exp_dir, "variables", "static.pkl"))
+    t_static = time.time() - t0
+    print(f"[{label}] Static done in {t_static:.1f}s obj={static_result['obj']}")
 
-    if two_stage_model.model.status in (2, 9):
-        result["two_stage_obj"] = two_stage_model.model.ObjVal
-        result["two_stage_gap"] = two_stage_model.model.MIPGap
-        result["two_stage_costs"] = two_stage_cost_breakdown(two_stage_model)
-        print(f"[{label}] Two-stage model done in {t_two_stage:.1f}s  obj={result['two_stage_obj']:.0f}")
-    else:
-        result["two_stage_obj"] = None
-        print(f"[{label}] Two-stage model ended with status {two_stage_model.model.status}")
-    result["two_stage_time"] = t_two_stage
+    t0 = time.time()
+    m.solve_MNP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    mnp_result = _extract_two_stage_result(
+        m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
+        mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
+        mnp_scenario_quantities_by_type)
+    save_all_variables(m, os.path.join(exp_dir, "variables", "mnp.pkl"))
+    t_mnp = time.time() - t0
+    print(f"[{label}] MNP done in {t_mnp:.1f}s obj={mnp_result['obj']}")
+
+    t0 = time.time()
+    m.solve_MRP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    mrp_result = _extract_two_stage_result(
+        m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
+        mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
+        mrp_scenario_quantities_by_type
+    )
+    save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"))
+    t_mrp = time.time() - t0
+    print(f"[{label}] MRP done in {t_mrp:.1f}s obj={mrp_result['obj']}")
+    # m is now left in its MRP-solved state — plot_all_comparisons' rebalancing
+    # plots rely on being able to query it live, right after this call.
+
+    results = {
+        "tree": _tree_result(tree_model, N, K),
+        "static": static_result,
+        "mnp": mnp_result,
+        "mrp": mrp_result,
+    }
+
+    result = dict(meta)
+    result["results"] = results
     result["n_leaves"] = len(leaf_prob)
     result["total_weeks"] = total_weeks
+    result["solve_times"] = {"tree": t_tree, "static": t_static, "mnp": t_mnp, "mrp": t_mrp}
+    result["total_time"] = t_tree + t_static + t_mnp + t_mrp
 
-    if result.get("tree_obj") is not None and result.get("two_stage_obj") is not None:
-        result["vms"] = result["two_stage_obj"] - result["tree_obj"]
-        result["vms_pct"] = 100 * result["vms"] / result["tree_obj"] if result["tree_obj"] else float("nan")
+    tree_obj = results["tree"]["obj"]
+    mrp_obj = results["mrp"]["obj"]
+    if tree_obj is not None and mrp_obj is not None:
+        result["vms_vs_mrp"] = mrp_obj - tree_obj
+        result["vms_vs_mrp_pct"] = 100 * result["vms_vs_mrp"] / tree_obj if tree_obj else float("nan")
 
-    result["total_time"] = t_tree + t_two_stage
     print(f"[{label}] Done in {result['total_time']:.1f}s "
-          f"(tree={t_tree:.1f}s, two_stage={t_two_stage:.1f}s)")
+          f"(tree={t_tree:.1f}s, static={t_static:.1f}s, mnp={t_mnp:.1f}s, mrp={t_mrp:.1f}s)")
 
-    if result.get("tree_obj") is not None and result.get("two_stage_obj") is not None:
-        plot_all_comparisons(tree_model, two_stage_model, N, K, total_weeks, output_dir=exp_dir)
+    if all(results[k]["obj"] is not None for k in ("tree", "static", "mnp", "mrp")):
+        plot_all_comparisons(tree_model, m, results, N, K, total_weeks, output_dir=exp_dir)
+
+    d_real, _, _ = build_full_horizon_scenarios(tree, N)
+    save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"))
+    save_scenario_quantities_by_type(results, K, os.path.join(exp_dir, "scenario_quantities.csv"))
 
     with open(os.path.join(exp_dir, "result.pkl"), "wb") as f:
         pickle.dump(result, f)
@@ -191,17 +241,22 @@ def main():
     print("\n" + "=" * 70)
     print(f"ALL DONE in {total_time:.1f}s")
     print("=" * 70)
-    print(f"{'Label':<16} {'Tree obj':>14} {'Two-stage obj':>16} {'VMS %':>9} {'Time (s)':>10}  Dir")
-    print("-" * 100)
+    print(f"{'Label':<14} {'Tree':>13} {'Static':>13} {'MNP':>13} {'MRP':>13} {'VMS%':>8} {'Time (s)':>9}  Dir")
+    print("-" * 115)
     for r in sorted(all_results, key=lambda x: x.get("label", "")):
         if "error" in r:
-            print(f"{r['label']:<16} {'ERROR':>14}")
+            print(f"{r['label']:<14} {'ERROR':>13}")
             continue
-        tree_obj = f"{r['tree_obj']:>14,.0f}" if r.get("tree_obj") is not None else f"{'N/A':>14}"
-        two_stage_obj = f"{r['two_stage_obj']:>16,.0f}" if r.get("two_stage_obj") is not None else f"{'N/A':>16}"
-        vms_pct = f"{r['vms_pct']:>8.2f}%" if r.get("vms_pct") is not None else f"{'N/A':>9}"
-        t = f"{r.get('total_time', 0):>10.1f}"
-        print(f"{r['label']:<16} {tree_obj} {two_stage_obj} {vms_pct} {t}  {r.get('exp_dir', '')}")
+        res = r.get("results", {})
+
+        def fmt(m):
+            obj = res.get(m, {}).get("obj")
+            return f"{obj:>13,.0f}" if obj is not None else f"{'N/A':>13}"
+
+        vms_pct = f"{r['vms_vs_mrp_pct']:>7.2f}%" if r.get("vms_vs_mrp_pct") is not None else f"{'N/A':>8}"
+        t = f"{r.get('total_time', 0):>9.1f}"
+        print(f"{r['label']:<14} {fmt('tree')} {fmt('static')} {fmt('mnp')} {fmt('mrp')} "
+              f"{vms_pct} {t}  {r.get('exp_dir', '')}")
 
     # Save combined results
     os.makedirs("experiments_tree_vs_two_stage", exist_ok=True)

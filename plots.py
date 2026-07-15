@@ -8,8 +8,25 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
+def _season_weeks(model):
+    """{b: [weeks in season b]} for this model, using model.B/model.season_of_week
+    if set (real seasons), else one season per week -- see build_model_MRP's
+    docstring in Model.py for the same fallback."""
+    B = getattr(model, "B", None) or list(model.T)
+    season_of_week = getattr(model, "season_of_week", None) or {t: t for t in model.T}
+    weeks_in_season = {b: [] for b in B}
+    for t in model.T:
+        weeks_in_season[season_of_week[t]].append(t)
+    return B, season_of_week, weeks_in_season
+
+
 def extract_MRP(model):
-    """Extract x[i,k,t], s[i,k,t], and y[i,j,k,t,o] from a solved MRP model."""
+    """Extract x[i,k,t] (expected across scenarios -- x is now genuine
+    second-stage recourse, see build_model_MRP's docstring in Model.py),
+    s[i,k,t] (expanded from its seasonal s[i,k,b] into one value per week,
+    repeated across each week of its season), and y[i,j,k,t,o] from a solved
+    MRP model."""
+    _, season_of_week, _ = _season_weeks(model)
     x = {}
     s = {}
     for k in model.K:
@@ -17,8 +34,9 @@ def extract_MRP(model):
         mat_s = np.zeros((len(model.N), len(model.T)))
         for idx_i, i in enumerate(model.N):
             for idx_t, t in enumerate(model.T):
-                mat_x[idx_i, idx_t] = model._get_val(f"x[{i},{k},{t}]")
-                mat_s[idx_i, idx_t] = model._get_val(f"s[{i},{k},{t}]")
+                mat_x[idx_i, idx_t] = sum(model.p_omega(o) * model._get_val(f"x[{i},{k},{t},{o}]")
+                                           for o in model.O)
+                mat_s[idx_i, idx_t] = model._get_val(f"s[{i},{k},{season_of_week[t]}]")
         x[k] = mat_x
         s[k] = mat_s
 
@@ -38,7 +56,10 @@ def extract_MRP(model):
 
 
 def extract_MNP(model):
-    """Extract x[i,k] (constant over time) and s[i,k,t] from a solved MNP model."""
+    """Extract x[i,k] (constant over time -- MNP has no rebalancing lever to
+    adapt it with) and s[i,k,t] (expanded from its seasonal s[i,k,b]) from a
+    solved MNP model."""
+    _, season_of_week, _ = _season_weeks(model)
     x = {}
     s = {}
     for k in model.K:
@@ -48,7 +69,7 @@ def extract_MNP(model):
             x_val = model._get_val(f"x[{i},{k}]")
             for idx_t, t in enumerate(model.T):
                 mat_x[idx_i, idx_t] = x_val  # constant across time
-                mat_s[idx_i, idx_t] = model._get_val(f"s[{i},{k},{t}]")
+                mat_s[idx_i, idx_t] = model._get_val(f"s[{i},{k},{season_of_week[t]}]")
         x[k] = mat_x
         s[k] = mat_s
     return x, s
@@ -58,10 +79,12 @@ def extract_MNP_costs(model):
     """
     Compute the total cost for each scenario o in the MNP model.
     Per scenario: beta*X + gamma*s + gamma_corr*s_corr(o)  (no rebalancing term)
+    s is seasonal (s[i,k,b]), cost = gamma[k] * s[i,k,b] * (weeks in season b).
     """
     fleet_cost = sum(model.beta[k] * model._get_val(f"X[{k}]") for k in model.K)
-    sub_cost = sum(model.gamma[k] * model._get_val(f"s[{i},{k},{t}]")
-                   for i in model.N for k in model.K for t in model.T)
+    B, _, weeks_in_season = _season_weeks(model)
+    sub_cost = sum(model.gamma[k] * model._get_val(f"s[{i},{k},{b}]") * len(weeks_in_season[b])
+                   for i in model.N for k in model.K for b in B)
     fixed = fleet_cost + sub_cost
 
     costs = []
@@ -73,7 +96,8 @@ def extract_MNP_costs(model):
 
 
 def extract_static(model):
-    """Extract x[i,k] (constant over time) and s[i,k,t] from a solved static model."""
+    """Extract x[i,k] and s[i,k] (both constant over time -- static has no
+    time index on either variable) from a solved static model."""
     x = {}
     s = {}
     for k in model.K:
@@ -81,9 +105,10 @@ def extract_static(model):
         mat_s = np.zeros((len(model.N), len(model.T)))
         for idx_i, i in enumerate(model.N):
             x_val = model._get_val(f"x[{i},{k}]")
+            s_val = model._get_val(f"s[{i},{k}]")
             for idx_t, t in enumerate(model.T):
                 mat_x[idx_i, idx_t] = x_val  # constant across time
-                mat_s[idx_i, idx_t] = model._get_val(f"s[{i},{k},{t}]")
+                mat_s[idx_i, idx_t] = s_val  # constant across time
         x[k] = mat_x
         s[k] = mat_s
     return x, s
@@ -163,11 +188,13 @@ def extract_MRP_costs(model):
     """
     Compute the total cost for each scenario o in the MRP model.
     Per scenario: beta*X + gamma*s + gamma_corr*s_corr(o) + alpha*y(o)
+    s is seasonal (s[i,k,b]), cost = gamma[k] * s[i,k,b] * (weeks in season b).
     """
     # Fixed costs (same across all scenarios)
     fleet_cost = sum(model.beta[k] * model._get_val(f"X[{k}]") for k in model.K)
-    sub_cost = sum(model.gamma[k] * model._get_val(f"s[{i},{k},{t}]")
-                   for i in model.N for k in model.K for t in model.T)
+    B, _, weeks_in_season = _season_weeks(model)
+    sub_cost = sum(model.gamma[k] * model._get_val(f"s[{i},{k},{b}]") * len(weeks_in_season[b])
+                   for i in model.N for k in model.K for b in B)
     fixed = fleet_cost + sub_cost
 
     costs = []
