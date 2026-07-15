@@ -51,6 +51,7 @@ before the next solve_*() call overwrites it. See _extract_two_stage_result().
 import csv
 import os
 import pickle
+import random
 
 import numpy as np
 
@@ -149,14 +150,14 @@ def save_flat_scenarios(d_real, leaf_prob, N, total_weeks, output_path):
 
 def build_cost_params(N, K, overrides=None):
     q = {0: 720, 1: 2000, 2: 2000}                       # cargo bike, e-van, d-van
-    beta = {0: 10538, 1: 35000, 2: 32000}
+    beta = {0: 10538, 1: 32000, 2: 30000}
     alpha = {(i, j, 0): 10 for i in N for j in N}
     alpha.update({(i, j, 1): 50 for i in N for j in N})
     alpha.update({(i, j, 2): 50 for i in N for j in N})
     gamma = {0: 300, 1: 800, 2: 732}
     gamma_corr = {k: 1.5 * v for k, v in gamma.items()}
     theta = {i: 0.3 for i in N}
-    S = {0: 50, 1: 50, 2: 100}
+    S = {0: 50, 1: 50, 2: 50}
     g = {0: 1, 1: 1, 2: 0}                              # 1 = green vehicle type
 
     params = dict(q=q, beta=beta, alpha=alpha, gamma=gamma, gamma_corr=gamma_corr,
@@ -905,6 +906,18 @@ def report_green_constraint(results, tol=1e-6):
 def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
             hub_correlation=None, make_plots=False, plot_dir="compare_plots"):
+    """
+    seed : int or None. An int (the default, 42) reproduces the exact same
+        instance every call — same demand tree, same everything. Pass
+        seed=None to get a fresh, genuinely random instance each call (drawn
+        from OS entropy); the actual seed used is printed so you can pass it
+        back in later to reproduce that specific run.
+    """
+    if seed is None:
+        seed = random.SystemRandom().randrange(2**31)
+        print(f"No seed given — using randomly generated seed={seed} "
+              f"(pass seed={seed} to reproduce this exact instance later)")
+
     N = list(range(n_hubs))
     K = list(range(n_types))
     solver_params = solver_params or {"TimeLimit": 600, "MIPGap": 0.01, "OutputFlag": 1}
@@ -990,8 +1003,9 @@ if __name__ == "__main__":
     [-0.8,  1.0,  0.0],
     [ 0.0,  0.0,  1.0],
     ]
+    seed = None
 
     compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, hub_correlation=hub_correlation,
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
-            make_plots=True, plot_dir="compare_plots")
+            make_plots=True, plot_dir="compare_plots", seed=seed)

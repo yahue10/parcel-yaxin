@@ -45,7 +45,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 14400,
+    "TimeLimit": 18000,
     "MIPGap": 0.01,
     "Threads": 8,
     "Presolve": 2,
@@ -66,6 +66,9 @@ MAX_WORKERS = 6
 INSTANCES = [
     {"label": "b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
      "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 42},
+
+    {"label": "b3_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 3, "n_hubs": 6, "n_types": 3, "seed": 40},
 ]
 
 

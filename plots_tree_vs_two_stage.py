@@ -33,6 +33,58 @@ TREE_COLOR = MODEL_COLORS["tree"]
 MRP_COLOR = MODEL_COLORS["mrp"]
 
 
+# ---------------------------------------------------------------------------
+# Week-axis helpers — every time-axis chart displays weeks as 1..total_weeks
+# (matching how a human would count periods) while all internal indexing
+# stays 0-based, unchanged, everywhere else in the codebase. Season
+# boundaries (from the tree's season structure) are marked the same way on
+# every such chart, so a reader can see at a glance where one season ends
+# and the next begins.
+# ---------------------------------------------------------------------------
+
+def _season_boundary_weeks(tree):
+    """Global week indices (0-indexed) where a NEW season starts, excluding
+    week 0 (the plot's left edge already marks the first season). E.g. 4
+    seasons x 13 weeks -> [13, 26, 39]."""
+    boundaries = []
+    offset = 0
+    for b in sorted(tree.e):
+        if offset > 0:
+            boundaries.append(offset)
+        offset += tree.e[b]
+    return boundaries
+
+
+def _week_tick_labels(total_weeks):
+    """1-indexed display labels for 0-indexed week positions 0..total_weeks-1."""
+    return [str(w + 1) for w in range(total_weeks)]
+
+
+def _set_week_ticks(ax, total_weeks):
+    """1-indexed week tick labels (1..total_weeks) for 0-indexed positions.
+    Call once, on the bottom/shared axis of a sharex figure — calling this
+    on every subplot would fight with sharex's auto-hidden inner labels."""
+    ax.set_xticks(range(total_weeks))
+    ax.set_xticklabels(_week_tick_labels(total_weeks))
+
+
+def _mark_season_boundaries(ax, total_weeks, boundaries):
+    """Dashed vertical line at each season boundary, plus a small 'S<n>'
+    label centered over each season's span, placed just inside the top of
+    the plot area (not above the axes edge, which would collide with
+    ax.set_title/fig.suptitle). Safe to call on every subplot (unlike
+    _set_week_ticks) since it only draws, it doesn't touch tick labels."""
+    if not boundaries:
+        return
+    for w in boundaries:
+        ax.axvline(w - 0.5, color="black", linestyle="--", linewidth=1, alpha=0.5, zorder=0.5)
+    edges = [0] + list(boundaries) + [total_weeks]
+    for season_idx, (start, end) in enumerate(zip(edges[:-1], edges[1:]), start=1):
+        mid = (start + end - 1) / 2
+        ax.text(mid, 0.98, f"S{season_idx}", transform=ax.get_xaxis_transform(),
+                ha="center", va="top", fontsize=8, color="dimgray")
+
+
 def plot_compare_objective(results, save=True, output_dir="."):
     """Bar chart of expected total cost across all 4 models, with the VMS-vs-MRP gap annotated."""
     tree_obj = results["tree"]["obj"]
@@ -235,6 +287,7 @@ def plot_compare_resource_over_time(tree_model, results, N, K, total_weeks,
     tree = tree_model.tree
     nodes_ge1 = tree.nodes_with_stage_ge1()
     stages = sorted(set(tree.nodes[n].stage for n in nodes_ge1))
+    boundaries = _season_boundary_weeks(tree)
 
     week_offset = {}
     offset = 0
@@ -285,9 +338,10 @@ def plot_compare_resource_over_time(tree_model, results, N, K, total_weeks,
             ax.set_title(f"Hub {i}")
             ax.legend(loc="upper right", fontsize=8)
             ax.grid(True, alpha=0.3)
+            _mark_season_boundaries(ax, total_weeks, boundaries)
 
         axes[-1].set_xlabel("Week")
-        axes[-1].set_xticks(range(total_weeks))
+        _set_week_ticks(axes[-1], total_weeks)
         fig.suptitle(f"Resource Level Over Time — {type_label}: Multistage vs Static vs MNP vs MRP",
                      fontsize=14, y=1.01)
         plt.tight_layout()
@@ -360,7 +414,8 @@ def plot_compare_rebalancing_over_time(tree_model, mrp_model, save=True, output_
     ax.plot(mrp_weeks, mrp_vals, linestyle="--", linewidth=1.5,
             alpha=0.8, color=MRP_COLOR, label=MODEL_LABELS["mrp"])
     ax.set_xlabel("Week")
-    ax.set_xticks(range(total_weeks))
+    _set_week_ticks(ax, total_weeks)
+    _mark_season_boundaries(ax, total_weeks, _season_boundary_weeks(tree_model.tree))
     ax.set_ylabel("Vehicles moved (all hub pairs & types)")
     ax.set_title("Rebalancing Volume Over Time: Multistage vs MRP")
     ax.legend(loc="upper right", fontsize=9)
@@ -409,7 +464,7 @@ def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, save=True, output
     mrp_mat = _mrp_rebalancing_matrix(mrp_model, N)
     vmax = max(tree_mat.max(), mrp_mat.max(), 1e-9)
 
-    fig, axes = plt.subplots(1, 2, figsize=(11, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
     im = None
     for ax, mat, title in zip(axes, [tree_mat, mrp_mat],
                                [MODEL_LABELS["tree"], MODEL_LABELS["mrp"]]):
@@ -437,60 +492,50 @@ def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, save=True, output
     return fig
 
 
-def plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, output_dir="."):
+def plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=None, output_dir="."):
     """
-    One figure PER scenario, each showing every hub's demand over the full
-    horizon for that specific scenario (same underlying data as
-    save_flat_scenarios' CSV, just one chart per root-to-leaf path instead of
-    one combined table). Saved to <output_dir>/demand_by_scenario/scenario_<o>.png.
+    One figure PER scenario, two subplots stacked top to bottom: top shows
+    every hub's demand over the full horizon for that scenario (same
+    underlying data as save_flat_scenarios' CSV), bottom shows the
+    AGGREGATED demand (summed across all hubs) for the same scenario. Saved
+    to <output_dir>/demand_by_scenario/scenario_<o>.png.
+
+    `tree` (optional): the scenario tree, used only to mark season
+    boundaries — pass None to skip the markers.
     """
     subdir = os.path.join(output_dir, "demand_by_scenario")
     os.makedirs(subdir, exist_ok=True)
     hub_colors = plt.cm.Accent(np.linspace(0, 1, len(N)))
+    boundaries = _season_boundary_weeks(tree) if tree is not None else []
 
     for o in sorted(leaf_prob):
-        fig, ax = plt.subplots(figsize=(max(10, total_weeks * 0.35), 5))
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(max(12, total_weeks * 0.35), 8), sharex=True)
+
         for idx, i in enumerate(N):
             vals = [d_real[i, t, o] for t in range(total_weeks)]
-            ax.plot(range(total_weeks), vals, marker="o", markersize=2, linewidth=1.5,
-                    color=hub_colors[idx], label=f"Hub {i}")
-        ax.set_xlabel("Week")
-        ax.set_xticks(range(total_weeks))
-        ax.set_ylabel("Demand")
-        ax.set_title(f"Demand Over Time — Scenario {o} (probability = {leaf_prob[o]:.4f})")
-        ax.legend(loc="upper right", fontsize=9)
-        ax.grid(True, alpha=0.3)
+            ax1.plot(range(total_weeks), vals, marker="o", markersize=2, linewidth=1.5,
+                     color=hub_colors[idx], label=f"Hub {i}")
+        ax1.set_ylabel("Demand")
+        ax1.set_title("Per-Hub Demand")
+        ax1.legend(loc="upper right", fontsize=9)
+        ax1.grid(True, alpha=0.3)
+        _mark_season_boundaries(ax1, total_weeks, boundaries)
+
+        totals = [sum(d_real[i, t, o] for i in N) for t in range(total_weeks)]
+        ax2.plot(range(total_weeks), totals, marker="o", markersize=2, linewidth=1.5, color=TREE_COLOR)
+        ax2.set_xlabel("Week")
+        _set_week_ticks(ax2, total_weeks)
+        _mark_season_boundaries(ax2, total_weeks, boundaries)
+        ax2.set_ylabel("Aggregated demand (all hubs)")
+        ax2.set_title("Aggregated Demand (All Hubs)")
+        ax2.grid(True, alpha=0.3)
+
+        fig.suptitle(f"Demand Over Time — Scenario {o} (probability = {leaf_prob[o]:.4f})", fontsize=14)
         plt.tight_layout()
         fig.savefig(os.path.join(subdir, f"scenario_{o}.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
     print(f"Per-scenario demand plots saved to {subdir}/ ({len(leaf_prob)} figures)")
-
-
-def plot_aggregated_demand_by_scenario(d_real, leaf_prob, N, total_weeks, output_dir="."):
-    """
-    One figure PER scenario, each showing the AGGREGATED demand (summed
-    across all hubs) over the full horizon for that scenario — companion to
-    plot_demand_by_scenario's per-hub breakdown. Saved to
-    <output_dir>/demand_by_scenario_aggregated/scenario_<o>.png.
-    """
-    subdir = os.path.join(output_dir, "demand_by_scenario_aggregated")
-    os.makedirs(subdir, exist_ok=True)
-
-    for o in sorted(leaf_prob):
-        totals = [sum(d_real[i, t, o] for i in N) for t in range(total_weeks)]
-        fig, ax = plt.subplots(figsize=(max(10, total_weeks * 0.35), 5))
-        ax.plot(range(total_weeks), totals, marker="o", markersize=2, linewidth=1.5, color=TREE_COLOR)
-        ax.set_xlabel("Week")
-        ax.set_xticks(range(total_weeks))
-        ax.set_ylabel("Aggregated demand (all hubs)")
-        ax.set_title(f"Aggregated Demand Over Time — Scenario {o} (probability = {leaf_prob[o]:.4f})")
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
-        fig.savefig(os.path.join(subdir, f"scenario_{o}.png"), dpi=150, bbox_inches="tight")
-        plt.close(fig)
-
-    print(f"Per-scenario aggregated demand plots saved to {subdir}/ ({len(leaf_prob)} figures)")
 
 
 # ---------------------------------------------------------------------------
@@ -648,13 +693,15 @@ def _mrp_residual_capacity(mrp_model, N, K, total_weeks):
     return result
 
 
-def _plot_resource_decomposition_model(model_key, decomp, residual, N, K, total_weeks, n_scenarios, output_dir):
+def _plot_resource_decomposition_model(model_key, decomp, residual, N, K, total_weeks, n_scenarios,
+                                        output_dir, boundaries=None):
     """One figure per scenario o: one subplot per hub, 3 grouped bars per
     week (one per vehicle type, distinguished by hatch), each bar stacked by
     component (distinguished by color), plus a residual-capacity line
     (secondary axis — total q-weighted capacity across all types minus that
     period's demand, i.e. the demand constraint's slack). Saved to
     <output_dir>/resource_decomposition/<model_key>/scenario_<o>.png."""
+    boundaries = boundaries or []
     subdir = os.path.join(output_dir, "resource_decomposition", model_key)
     os.makedirs(subdir, exist_ok=True)
     n_hubs = len(N)
@@ -704,6 +751,7 @@ def _plot_resource_decomposition_model(model_key, decomp, residual, N, K, total_
             ax.set_title(f"Hub {i}")
             ax.set_ylabel("Resource level (units)")
             ax.grid(True, axis="y", alpha=0.3)
+            _mark_season_boundaries(ax, total_weeks, boundaries)
 
             residual_vals = [residual[i, t, o] for t in range(total_weeks)]
             ax2 = ax.twinx()
@@ -714,7 +762,7 @@ def _plot_resource_decomposition_model(model_key, decomp, residual, N, K, total_
             ax2.tick_params(axis="y", labelcolor=RESIDUAL_COLOR)
 
         axes[-1].set_xlabel("Week")
-        axes[-1].set_xticks(weeks)
+        _set_week_ticks(axes[-1], total_weeks)
 
         component_handles = [mpatches.Patch(facecolor=COMPONENT_COLORS[c], edgecolor="black",
                                              label=COMPONENT_LABELS[c]) for c in COMPONENT_ORDER]
@@ -748,11 +796,12 @@ def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_w
     mrp_decomp, n_mrp = _mrp_resource_decomposition(mrp_model, total_weeks)
     tree_residual = _tree_residual_capacity(tree_model, N, K)
     mrp_residual = _mrp_residual_capacity(mrp_model, N, K, total_weeks)
+    boundaries = _season_boundary_weeks(tree_model.tree)
 
     _plot_resource_decomposition_model("tree", tree_decomp, tree_residual, N, K, total_weeks,
-                                        n_tree, output_dir)
+                                        n_tree, output_dir, boundaries=boundaries)
     _plot_resource_decomposition_model("mrp", mrp_decomp, mrp_residual, N, K, total_weeks,
-                                        n_mrp, output_dir)
+                                        n_mrp, output_dir, boundaries=boundaries)
 
     print(f"Resource decomposition plots saved to "
           f"{os.path.join(output_dir, 'resource_decomposition')}/ ({n_tree + n_mrp} figures)")
@@ -778,8 +827,7 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
     plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, output_dir=output_dir)
 
     d_real, leaf_prob, _ = build_full_horizon_scenarios(tree_model.tree, N)
-    plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, output_dir=output_dir)
-    plot_aggregated_demand_by_scenario(d_real, leaf_prob, N, total_weeks, output_dir=output_dir)
+    plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=tree_model.tree, output_dir=output_dir)
     plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir)
 
     tree_obj = results["tree"]["obj"]
