@@ -116,8 +116,8 @@ class ScenarioTree:
 
 
 def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_season=13,
-                             base_mean_range=(20000, 40000), season_drift=0.15,
-                             noise_frac=0.05, hub_correlation=None,
+                             base_mean_range=(10000, 30000), season_drift=0.3,
+                             noise_frac=0.02, hub_correlation=None,
                              sibling_drift_correlation=1, seed=42):
     """
     Demand per node is a random-walk perturbation of the parent's demand
@@ -150,9 +150,32 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
         (same direction AND magnitude that season; they only start to differ
         via the still-independent weekly noise). Values in between make
         siblings *tend* to move the same direction without forcing it.
+
+    season_drift : float, dict, or (low, high) tuple.
+        - float (default): the same standard-deviation scale is used for
+          every season's drift shock, as before.
+        - dict {season b: drift value}: an explicit, different drift
+          magnitude per season, e.g. {1: 0.1, 2: 0.2, 3: 0.3, 4: 0.5} for a
+          system that grows more volatile in later seasons. Must have an
+          entry for every season in `seasons`.
+        - (low, high) tuple: draws ONE random drift value per season,
+          uniformly from [low, high), using this function's own seeded RNG
+          (so it's reproducible for a given seed, but varies season to
+          season) — e.g. (0.1, 0.5).
     """
     rng = random.Random(seed)
     rng_np = np.random.default_rng(seed)
+
+    if isinstance(season_drift, dict):
+        missing = set(seasons) - set(season_drift)
+        if missing:
+            raise ValueError(f"season_drift dict is missing entries for season(s) {sorted(missing)}")
+        drift_by_season = dict(season_drift)
+    elif isinstance(season_drift, tuple):
+        lo, hi = season_drift
+        drift_by_season = {b: rng.uniform(lo, hi) for b in seasons}
+    else:
+        drift_by_season = {b: season_drift for b in seasons}
 
     n = len(N)
     corr = np.eye(n) if hub_correlation is None else np.asarray(hub_correlation, dtype=float)
@@ -188,7 +211,7 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
                 own_drift = correlated_shocks()
                 z_drift = (own_drift if rho <= 0
                            else np.sqrt(rho) * shared_drift + np.sqrt(1 - rho) * own_drift)
-                level = {i: max(0.0, parent_level[i] * (1 + season_drift * z_drift[idx]))
+                level = {i: max(0.0, parent_level[i] * (1 + drift_by_season[b] * z_drift[idx]))
                          for idx, i in enumerate(N)}
                 demand = {}
                 for t in range(1, weeks_per_season + 1):

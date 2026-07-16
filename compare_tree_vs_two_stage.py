@@ -905,13 +905,19 @@ def report_green_constraint(results, tol=1e-6):
 
 def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
-            hub_correlation=None, make_plots=False, plot_dir="compare_plots"):
+            hub_correlation=None, season_drift=None, sibling_drift_correlation=None,
+            noise_frac=None, make_plots=False, plot_dir="compare_plots"):
     """
     seed : int or None. An int (the default, 42) reproduces the exact same
         instance every call — same demand tree, same everything. Pass
         seed=None to get a fresh, genuinely random instance each call (drawn
         from OS entropy); the actual seed used is printed so you can pass it
         back in later to reproduce that specific run.
+
+    season_drift, sibling_drift_correlation, noise_frac : passed straight
+        through to build_toy_scenario_tree — see its docstring in
+        ScenarioTreeModel.py. Each defaults to None here, which leaves that
+        function's own default in place.
     """
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
@@ -922,9 +928,15 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     K = list(range(n_types))
     solver_params = solver_params or {"TimeLimit": 600, "MIPGap": 0.01, "OutputFlag": 1}
 
-    tree = build_toy_scenario_tree(N, seasons=seasons, branching=branching,
-                                    weeks_per_season=weeks_per_season,
-                                    hub_correlation=hub_correlation, seed=seed)
+    tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
+                        hub_correlation=hub_correlation, seed=seed)
+    if season_drift is not None:
+        tree_kwargs["season_drift"] = season_drift
+    if sibling_drift_correlation is not None:
+        tree_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
+    if noise_frac is not None:
+        tree_kwargs["noise_frac"] = noise_frac
+    tree = build_toy_scenario_tree(N, **tree_kwargs)
     tree.validate(N)
     n_leaves = branching ** len(seasons)
     total_weeks = len(seasons) * weeks_per_season
@@ -998,14 +1010,20 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
 if __name__ == "__main__":
 
-    hub_correlation = [
-    [ 1.0, -0.8,  0.0],
-    [-0.8,  1.0,  0.0],
-    [ 0.0,  0.0,  1.0],
-    ]
+    # hub_correlation = [
+    # [ 1.0, -0.8,  0.0],
+    # [-0.8,  1.0,  0.0],
+    # [ 0.0,  0.0,  1.0],
+    # ]
+    hub_correlation= None
     seed = None
+    season_drift = (0.05,0.1,0.1,0.2)
+    sibling_drift_correlation = 1
+    noise_frac = 0.3
 
     compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
-            n_hubs=3, n_types=3, hub_correlation=hub_correlation,
+            n_hubs=5, n_types=3, hub_correlation=hub_correlation,
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
-            make_plots=True, plot_dir="compare_plots", seed=seed)
+            make_plots=True, plot_dir="compare_plots", seed=seed, season_drift=season_drift,
+            sibling_drift_correlation=sibling_drift_correlation,
+            noise_frac=noise_frac)

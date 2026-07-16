@@ -63,12 +63,19 @@ MAX_WORKERS = 6
 # unit diagonal) applied to both season-drift and weekly-noise demand shocks, e.g.
 # "hub_correlation": [[1, -0.8, 0], [-0.8, 1, 0], [0, 0, 1]] for hubs 0/1 strongly
 # opposed and hub 2 independent. Omit for independent hubs (today's default).
+# Optional "season_drift" key: float, dict {season: drift}, or (low, high)
+# tuple — see build_toy_scenario_tree's docstring in ScenarioTreeModel.py.
+# Omit to use that function's own default.
+# Optional "sibling_drift_correlation" key: float in [0, 1] controlling how
+# much siblings' season-drift shocks move together (0=independent,
+# 1=lock-step). Optional "noise_frac" key: within-season weekly noise scale.
+# Both omit to that function's own defaults — see its docstring.
 INSTANCES = [
     {"label": "b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 42},
+     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 42},
 
     {"label": "b3_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 3, "n_hubs": 6, "n_types": 3, "seed": 40},
+     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40},
 ]
 
 
@@ -108,6 +115,9 @@ def solve_instance(instance_cfg):
     seed = instance_cfg["seed"]
     cost_overrides = instance_cfg.get("costs")
     hub_correlation = instance_cfg.get("hub_correlation")
+    season_drift = instance_cfg.get("season_drift")
+    sibling_drift_correlation = instance_cfg.get("sibling_drift_correlation")
+    noise_frac = instance_cfg.get("noise_frac")
     N = list(range(instance_cfg["n_hubs"]))
     K = list(range(instance_cfg["n_types"]))
 
@@ -119,9 +129,15 @@ def solve_instance(instance_cfg):
     os.makedirs(exp_dir, exist_ok=True)
 
     # --- Build the instance: the scenario tree, then the scenarios derived from it ---
-    tree = build_toy_scenario_tree(N, seasons=seasons, branching=branching,
-                                    weeks_per_season=weeks_per_season,
-                                    hub_correlation=hub_correlation, seed=seed)
+    tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
+                        hub_correlation=hub_correlation, seed=seed)
+    if season_drift is not None:
+        tree_kwargs["season_drift"] = season_drift
+    if sibling_drift_correlation is not None:
+        tree_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
+    if noise_frac is not None:
+        tree_kwargs["noise_frac"] = noise_frac
+    tree = build_toy_scenario_tree(N, **tree_kwargs)
     tree.validate(N)
 
     meta = {
