@@ -31,6 +31,7 @@ You can configure:
 
 import os
 import time
+import json
 import pickle
 import traceback
 from datetime import datetime
@@ -71,11 +72,49 @@ MAX_WORKERS = 6
 # 1=lock-step). Optional "noise_frac" key: within-season weekly noise scale.
 # Both omit to that function's own defaults — see its docstring.
 INSTANCES = [
-    {"label": "b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 42},
+    {"label": "hub10_corr1_b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 42, "season_drift": (0.15, 0.20), 
+     "sibling_drift_correlation": 1, "noise_frac": 0.05, 
+     "hub_correlation": [
+    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0,  0.4],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.4,  1.0],
+        ]
+        },
 
-    {"label": "b3_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40},
+    {"label": "hub8_corr1_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.15, 0.20), 
+     "sibling_drift_correlation": 1, "noise_frac": 0.05,
+     "hub_correlation": [
+    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0],
+        ]},
+    {"label": "hub8_corr2_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.15, 0.20), 
+     "sibling_drift_correlation": 1, "noise_frac": 0.05,
+     "hub_correlation": [
+    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  1.0,  0.3,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  0.3,  1.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5],
+    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0],
+        ]},
 ]
 
 
@@ -104,6 +143,7 @@ def solve_instance(instance_cfg):
         static_green_coverage_ratios, mnp_green_coverage_ratios, mrp_green_coverage_ratios,
         static_scenario_quantities_by_type, mnp_scenario_quantities_by_type,
         mrp_scenario_quantities_by_type,
+        static_scenario_demand_coverage, mnp_scenario_demand_coverage, mrp_scenario_demand_coverage,
         _extract_two_stage_result, _tree_result, _flat_resource, _mrp_resource,
     )
     from plots_tree_vs_two_stage import plot_all_comparisons
@@ -127,6 +167,14 @@ def solve_instance(instance_cfg):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = os.path.join("experiments_tree_vs_two_stage", f"{label}_{timestamp}")
     os.makedirs(exp_dir, exist_ok=True)
+
+    # Save the exact instance config used, before any solving starts, so a
+    # crashed/partial run still leaves a record of what was attempted, and
+    # so results can be traced back to their settings even after INSTANCES
+    # has since changed. Tuples round-trip as JSON arrays (informational
+    # only -- not meant to be fed back into INSTANCES verbatim).
+    with open(os.path.join(exp_dir, "instance_config.json"), "w") as f:
+        json.dump(instance_cfg, f, indent=2, default=str)
 
     # --- Build the instance: the scenario tree, then the scenarios derived from it ---
     tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
@@ -163,7 +211,7 @@ def solve_instance(instance_cfg):
     static_result = _extract_two_stage_result(
         m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
-        static_scenario_quantities_by_type)
+        static_scenario_quantities_by_type, static_scenario_demand_coverage)
     save_all_variables(m, os.path.join(exp_dir, "variables", "static.pkl"))
     t_static = time.time() - t0
     print(f"[{label}] Static done in {t_static:.1f}s obj={static_result['obj']}")
@@ -173,7 +221,7 @@ def solve_instance(instance_cfg):
     mnp_result = _extract_two_stage_result(
         m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
-        mnp_scenario_quantities_by_type)
+        mnp_scenario_quantities_by_type, mnp_scenario_demand_coverage)
     save_all_variables(m, os.path.join(exp_dir, "variables", "mnp.pkl"))
     t_mnp = time.time() - t0
     print(f"[{label}] MNP done in {t_mnp:.1f}s obj={mnp_result['obj']}")
@@ -183,7 +231,7 @@ def solve_instance(instance_cfg):
     mrp_result = _extract_two_stage_result(
         m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
-        mrp_scenario_quantities_by_type
+        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage
     )
     save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"))
     t_mrp = time.time() - t0

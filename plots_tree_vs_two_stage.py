@@ -168,7 +168,7 @@ def plot_compare_scenario_costs(results, save=True, output_dir="."):
         ax.set_ylabel("Realized cost per scenario")
         ax.grid(True, axis="y", alpha=0.3)
 
-    fig.suptitle("Per-Scenario Cost Distribution (realized, not expected)", fontsize=14)
+    fig.suptitle("Per-Scenario Cost Distribution", fontsize=14)
     plt.tight_layout()
     if save:
         fig.savefig(os.path.join(output_dir, "compare_scenario_costs.png"), dpi=150, bbox_inches="tight")
@@ -239,6 +239,60 @@ def plot_compare_green_ratio(results, save=True, output_dir="."):
     plt.tight_layout()
     if save:
         fig.savefig(os.path.join(output_dir, "compare_green_ratio.png"), dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return fig
+
+
+DEMAND_COVERAGE_COLORS = {"purchased": "#B0B0B0", "planned": "#DD8452", "corrective": "#C44E52"}
+DEMAND_COVERAGE_LABELS = {
+    "purchased": "Purchased (owned fleet, incl. rebalancing)",
+    "planned": "Planned subcontracting",
+    "corrective": "Corrective subcontracting",
+}
+
+
+def plot_compare_demand_coverage(results, save=True, output_dir="."):
+    """
+    One subplot per model (4 rows), one stacked bar per scenario: how much
+    of that scenario's total demand (q-weighted capacity, summed across all
+    hubs & weeks) was met by each source -- purchased fleet (owned capacity,
+    already reflecting any rebalancing for tree/MRP), planned subcontracting,
+    corrective subcontracting -- expressed as a ratio to that scenario's
+    demand (not forced to sum to exactly 1.0; total bar height is the
+    scenario's actual coverage/demand ratio, typically slightly above 1.0).
+    A red reference line at 1.0 marks exactly meeting demand.
+    """
+    n_scenarios = max(len(results[m]["demand_coverage"]) for m in MODEL_ORDER)
+    x = np.arange(n_scenarios)
+
+    fig, axes = plt.subplots(len(MODEL_ORDER), 1, figsize=(max(10, n_scenarios * 0.5), 4 * len(MODEL_ORDER)),
+                              sharex=True)
+    if len(MODEL_ORDER) == 1:
+        axes = [axes]
+
+    for ax, m in zip(axes, MODEL_ORDER):
+        cov = results[m]["demand_coverage"]
+        bottoms = np.zeros(n_scenarios)
+        for comp in ("purchased", "planned", "corrective"):
+            vals = np.array([cov[o][comp] / cov[o]["demand"] if cov[o]["demand"] > 0 else 0.0
+                              for o in range(n_scenarios)])
+            ax.bar(x, vals, bottom=bottoms, color=DEMAND_COVERAGE_COLORS[comp],
+                   edgecolor="black", linewidth=0.3, label=DEMAND_COVERAGE_LABELS[comp])
+            bottoms += vals
+        ax.axhline(1.0, color="red", linestyle="--", linewidth=1.2, alpha=0.8)
+        ax.set_ylabel("Coverage / demand")
+        ax.set_title(MODEL_LABELS[m])
+        ax.grid(True, axis="y", alpha=0.3)
+
+    axes[0].legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=9,
+                    title="Source (stacked; red line = demand)")
+    axes[-1].set_xlabel("Scenario")
+    axes[-1].set_xticks(x)
+    axes[-1].set_xticklabels([str(o) for o in range(n_scenarios)])
+    fig.suptitle("Demand Coverage by Source, per Scenario: Multistage vs Static vs MNP vs MRP", fontsize=14, y=1.0)
+    plt.tight_layout()
+    if save:
+        fig.savefig(os.path.join(output_dir, "compare_demand_coverage.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
     return fig
 
@@ -360,66 +414,163 @@ def plot_compare_resource_over_time(tree_model, results, N, K, total_weeks,
 # have no y variable at all.
 # ---------------------------------------------------------------------------
 
-def _tree_rebalancing_by_week(tree_model):
-    """Expected total rebalancing volume (all hub pairs & types) per global week."""
+def _tree_rebalancing_by_week_per_scenario(tree_model):
+    """{o: {week: realized rebalancing that week}} for every leaf/scenario o
+    -- the actual y-values along that leaf's root-to-leaf ancestry (not an
+    expectation). Returns (result, total_weeks)."""
     tree = tree_model.tree
-    nodes_ge1 = tree.nodes_with_stage_ge1()
-    stages = sorted(set(tree.nodes[n].stage for n in nodes_ge1))
+    result = {}
+    total_weeks = 0
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        weekly = {}
+        week_offset = 0
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            L = tree.block_length(n)
+            for t_local in range(1, L + 1):
+                w = week_offset + t_local - 1
+                weekly[w] = sum(
+                    tree_model._get_val(f"y[{n},{i},{j},{k},{t_local}]")
+                    for (i, j) in tree_model.A for k in tree_model.K
+                )
+            week_offset += L
+        result[o] = weekly
+        total_weeks = week_offset
+    return result, total_weeks
 
-    week_offset = {}
-    offset = 0
-    for b in stages:
-        week_offset[b] = offset
-        offset += tree.e[b]
-    total_weeks = offset
 
-    weekly = {}
-    for b in stages:
-        nodes_b = [n for n in nodes_ge1 if tree.nodes[n].stage == b]
-        for t_local in range(1, tree.e[b] + 1):
-            w = week_offset[b] + t_local - 1
-            weekly[w] = sum(
-                tree.nodes[n].prob * tree_model._get_val(f"y[{n},{i},{j},{k},{t_local}]")
-                for n in nodes_b for (i, j) in tree_model.A for k in tree_model.K
+def _mrp_rebalancing_by_week_per_scenario(mrp_model):
+    """{o: {week: realized rebalancing that week}} for every scenario o."""
+    result = {}
+    for o in mrp_model.O:
+        weekly = {}
+        for t in mrp_model.T:
+            weekly[t] = sum(
+                mrp_model._get_val(f"y[{i},{j},{k},{t},{o}]")
+                for i in mrp_model.N for j in mrp_model.N if i != j
+                for k in mrp_model.K
             )
-    return weekly, total_weeks
+        result[o] = weekly
+    return result
 
 
-def _mrp_rebalancing_by_week(mrp_model):
-    """Expected total rebalancing volume (all hub pairs & types) per week."""
-    weekly = {}
-    for t in mrp_model.T:
-        weekly[t] = sum(
-            mrp_model.p_omega(o) * mrp_model._get_val(f"y[{i},{j},{k},{t},{o}]")
-            for o in mrp_model.O
-            for i in mrp_model.N for j in mrp_model.N if i != j
-            for k in mrp_model.K
-        )
-    return weekly
+def _tree_rebalancing_matrix_per_scenario(tree_model, N):
+    """{o: hub x hub matrix} realized rebalancing (all weeks & types) for
+    each leaf/scenario o (not an expectation)."""
+    tree = tree_model.tree
+    idx = {i: p for p, i in enumerate(N)}
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        mat = np.zeros((len(N), len(N)))
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            weeks = range(1, tree.block_length(n) + 1)
+            for (i, j) in tree_model.A:
+                total = sum(tree_model._get_val(f"y[{n},{i},{j},{k},{t}]")
+                            for k in tree_model.K for t in weeks)
+                mat[idx[i], idx[j]] += total
+        result[o] = mat
+    return result
 
 
-def plot_compare_rebalancing_over_time(tree_model, mrp_model, save=True, output_dir="."):
-    """Total vehicles moved (summed over hub pairs & types) per week, tree vs MRP."""
-    tree_weekly, total_weeks = _tree_rebalancing_by_week(tree_model)
-    mrp_weekly = _mrp_rebalancing_by_week(mrp_model)
+def _mrp_rebalancing_matrix_per_scenario(mrp_model, N):
+    """{o: hub x hub matrix} realized rebalancing (all periods & types) for
+    each scenario o."""
+    idx = {i: p for p, i in enumerate(N)}
+    result = {}
+    for o in mrp_model.O:
+        mat = np.zeros((len(N), len(N)))
+        for i in N:
+            for j in N:
+                if i == j:
+                    continue
+                mat[idx[i], idx[j]] = sum(
+                    mrp_model._get_val(f"y[{i},{j},{k},{t},{o}]")
+                    for k in mrp_model.K for t in mrp_model.T
+                )
+        result[o] = mat
+    return result
 
-    tree_weeks = sorted(tree_weekly)
-    tree_vals = [tree_weekly[w] for w in tree_weeks]
-    mrp_weeks = sorted(mrp_weekly)
-    mrp_vals = [mrp_weekly[w] for w in mrp_weeks]
 
-    fig, ax = plt.subplots(figsize=(max(12, total_weeks * 0.35), 5))
-    ax.plot(tree_weeks, tree_vals, marker="o", markersize=4, linewidth=1.5,
-            color=TREE_COLOR, label=MODEL_LABELS["tree"])
-    ax.plot(mrp_weeks, mrp_vals, linestyle="--", linewidth=1.5,
-            alpha=0.8, color=MRP_COLOR, label=MODEL_LABELS["mrp"])
-    ax.set_xlabel("Week")
-    _set_week_ticks(ax, total_weeks)
-    _mark_season_boundaries(ax, total_weeks, _season_boundary_weeks(tree_model.tree))
-    ax.set_ylabel("Vehicles moved (all hub pairs & types)")
-    ax.set_title("Rebalancing Volume Over Time: Multistage vs MRP")
-    ax.legend(loc="upper right", fontsize=9)
-    ax.grid(True, alpha=0.3)
+def _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks):
+    """
+    Picks the 3 "interesting" scenarios shown by the rebalancing plots,
+    instead of an expected/averaged value across all scenarios:
+      - worst/best total realized demand -- shared between tree and MRP,
+        since both are solved on the identical underlying demand paths.
+      - most rebalancing volume -- picked SEPARATELY per model, since tree
+        and MRP can realize very different rebalancing plans for the same
+        demand path (may end up as different scenario indices).
+    Returns a dict with o_worst_demand, o_best_demand, o_tree_most_rebal,
+    o_mrp_most_rebal, plus the underlying per-scenario totals (for titles).
+    """
+    d_real, leaf_prob, _ = build_full_horizon_scenarios(tree_model.tree, N)
+    n_scenarios = len(leaf_prob)
+    total_demand = {o: sum(d_real[i, t, o] for i in N for t in range(total_weeks))
+                     for o in range(n_scenarios)}
+    o_worst_demand = max(total_demand, key=total_demand.get)
+    o_best_demand = min(total_demand, key=total_demand.get)
+
+    tree_weekly_by_o, _ = _tree_rebalancing_by_week_per_scenario(tree_model)
+    mrp_weekly_by_o = _mrp_rebalancing_by_week_per_scenario(mrp_model)
+    tree_total_rebal = {o: sum(w.values()) for o, w in tree_weekly_by_o.items()}
+    mrp_total_rebal = {o: sum(w.values()) for o, w in mrp_weekly_by_o.items()}
+    o_tree_most_rebal = max(tree_total_rebal, key=tree_total_rebal.get)
+    o_mrp_most_rebal = max(mrp_total_rebal, key=mrp_total_rebal.get)
+
+    return {
+        "o_worst_demand": o_worst_demand, "o_best_demand": o_best_demand,
+        "o_tree_most_rebal": o_tree_most_rebal, "o_mrp_most_rebal": o_mrp_most_rebal,
+        "total_demand": total_demand,
+        "tree_total_rebal": tree_total_rebal, "mrp_total_rebal": mrp_total_rebal,
+    }
+
+
+def plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, save=True, output_dir="."):
+    """Total vehicles moved (summed over hub pairs & types) per week, tree vs
+    MRP, for 3 specific scenarios (not an expectation across all of them):
+    worst-demand, best-demand (shared scenario index between the two
+    models), and each model's own busiest-rebalancing scenario."""
+    sel = _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks)
+    tree_weekly_by_o, _ = _tree_rebalancing_by_week_per_scenario(tree_model)
+    mrp_weekly_by_o = _mrp_rebalancing_by_week_per_scenario(mrp_model)
+    boundaries = _season_boundary_weeks(tree_model.tree)
+
+    rows = [
+        ("Highest Total Demand (All Hubs, All Weeks)", sel["o_worst_demand"], sel["o_worst_demand"],
+         f"total demand={sel['total_demand'][sel['o_worst_demand']]:,.0f}"),
+        ("Lowest Total Demand (All Hubs, All Weeks)", sel["o_best_demand"], sel["o_best_demand"],
+         f"total demand={sel['total_demand'][sel['o_best_demand']]:,.0f}"),
+        ("Highest Total Rebalancing Volume", sel["o_tree_most_rebal"], sel["o_mrp_most_rebal"],
+         f"tree: o={sel['o_tree_most_rebal']}, MRP: o={sel['o_mrp_most_rebal']} (may differ)"),
+    ]
+
+    fig, axes = plt.subplots(3, 1, figsize=(max(12, total_weeks * 0.35), 15), sharex=True)
+    for ax, (title, o_tree, o_mrp, subtitle) in zip(axes, rows):
+        tree_weekly = tree_weekly_by_o[o_tree]
+        mrp_weekly = mrp_weekly_by_o[o_mrp]
+        tree_weeks = sorted(tree_weekly)
+        tree_vals = [tree_weekly[w] for w in tree_weeks]
+        mrp_weeks = sorted(mrp_weekly)
+        mrp_vals = [mrp_weekly[w] for w in mrp_weeks]
+
+        ax.plot(tree_weeks, tree_vals, marker="o", markersize=4, linewidth=1.5,
+                color=TREE_COLOR, label=f"{MODEL_LABELS['tree']} (o={o_tree})")
+        ax.plot(mrp_weeks, mrp_vals, linestyle="--", linewidth=1.5,
+                alpha=0.8, color=MRP_COLOR, label=f"{MODEL_LABELS['mrp']} (o={o_mrp})")
+        ax.set_ylabel("Vehicles moved")
+        ax.set_title(f"{title} ({subtitle})", fontsize=11)
+        ax.legend(loc="upper right", fontsize=9)
+        ax.grid(True, alpha=0.3)
+        _mark_season_boundaries(ax, total_weeks, boundaries)
+
+    axes[-1].set_xlabel("Week")
+    _set_week_ticks(axes[-1], total_weeks)
+    fig.suptitle("Rebalancing Volume Over Time: Multistage vs MRP (selected scenarios)", fontsize=14, y=1.0)
     plt.tight_layout()
     if save:
         fig.savefig(os.path.join(output_dir, "compare_rebalancing_over_time.png"), dpi=150, bbox_inches="tight")
@@ -427,65 +578,47 @@ def plot_compare_rebalancing_over_time(tree_model, mrp_model, save=True, output_
     return fig
 
 
-def _tree_rebalancing_matrix(tree_model, N):
-    """Expected total rebalancing volume (all weeks & types) per (from, to) hub pair."""
-    tree = tree_model.tree
-    nodes_ge1 = tree.nodes_with_stage_ge1()
-    idx = {i: p for p, i in enumerate(N)}
-    mat = np.zeros((len(N), len(N)))
-    for n in nodes_ge1:
-        prob = tree.nodes[n].prob
-        weeks = range(1, tree.block_length(n) + 1)
-        for (i, j) in tree_model.A:
-            total = sum(tree_model._get_val(f"y[{n},{i},{j},{k},{t}]")
-                        for k in tree_model.K for t in weeks)
-            mat[idx[i], idx[j]] += prob * total
-    return mat
+def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, save=True, output_dir="."):
+    """Hub x hub heatmap of realized rebalancing volume, tree vs MRP side by
+    side, for the same 3 selected scenarios as plot_compare_rebalancing_over_time
+    (not an expectation across all scenarios)."""
+    sel = _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks)
+    tree_mat_by_o = _tree_rebalancing_matrix_per_scenario(tree_model, N)
+    mrp_mat_by_o = _mrp_rebalancing_matrix_per_scenario(mrp_model, N)
 
+    rows = [
+        ("Highest Total Demand (All Hubs, All Weeks)", sel["o_worst_demand"], sel["o_worst_demand"]),
+        ("Lowest Total Demand (All Hubs, All Weeks)", sel["o_best_demand"], sel["o_best_demand"]),
+        ("Highest Total Rebalancing Volume", sel["o_tree_most_rebal"], sel["o_mrp_most_rebal"]),
+    ]
+    mats = [(tree_mat_by_o[o_tree], mrp_mat_by_o[o_mrp]) for _, o_tree, o_mrp in rows]
+    vmax = max(max(t.max(), m.max()) for t, m in mats)
+    vmax = max(vmax, 1e-9)
 
-def _mrp_rebalancing_matrix(mrp_model, N):
-    """Expected total rebalancing volume (all periods & types) per (from, to) hub pair."""
-    idx = {i: p for p, i in enumerate(N)}
-    mat = np.zeros((len(N), len(N)))
-    for i in N:
-        for j in N:
-            if i == j:
-                continue
-            mat[idx[i], idx[j]] = sum(
-                mrp_model.p_omega(o) * mrp_model._get_val(f"y[{i},{j},{k},{t},{o}]")
-                for o in mrp_model.O for k in mrp_model.K for t in mrp_model.T
-            )
-    return mat
-
-
-def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, save=True, output_dir="."):
-    """Hub x hub heatmap of total expected rebalancing volume, tree vs MRP side by side."""
-    tree_mat = _tree_rebalancing_matrix(tree_model, N)
-    mrp_mat = _mrp_rebalancing_matrix(mrp_model, N)
-    vmax = max(tree_mat.max(), mrp_mat.max(), 1e-9)
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+    fig, axes = plt.subplots(3, 2, figsize=(12, 15), constrained_layout=True)
     im = None
-    for ax, mat, title in zip(axes, [tree_mat, mrp_mat],
-                               [MODEL_LABELS["tree"], MODEL_LABELS["mrp"]]):
-        im = ax.imshow(mat, cmap="Blues", vmin=0, vmax=vmax)
-        ax.set_xticks(range(len(N)))
-        ax.set_yticks(range(len(N)))
-        ax.set_xticklabels([f"Hub {j}" for j in N])
-        ax.set_yticklabels([f"Hub {i}" for i in N])
-        ax.set_xlabel("To")
-        ax.set_ylabel("From")
-        ax.set_title(title)
-        for pi in range(len(N)):
-            for pj in range(len(N)):
-                if pi == pj:
-                    continue
-                val = mat[pi, pj]
-                color = "white" if val > vmax * 0.6 else "black"
-                ax.text(pj, pi, f"{val:,.0f}", ha="center", va="center", fontsize=9, color=color)
+    for row_idx, ((title, o_tree, o_mrp), (tree_mat, mrp_mat)) in enumerate(zip(rows, mats)):
+        for col_idx, (mat, model_label, o) in enumerate([(tree_mat, MODEL_LABELS["tree"], o_tree),
+                                                           (mrp_mat, MODEL_LABELS["mrp"], o_mrp)]):
+            ax = axes[row_idx, col_idx]
+            im = ax.imshow(mat, cmap="Blues", vmin=0, vmax=vmax)
+            ax.set_xticks(range(len(N)))
+            ax.set_yticks(range(len(N)))
+            ax.set_xticklabels([f"Hub {j}" for j in N])
+            ax.set_yticklabels([f"Hub {i}" for i in N])
+            ax.set_xlabel("To")
+            ax.set_ylabel("From")
+            ax.set_title(f"{title}\n{model_label} (o={o})", fontsize=10)
+            for pi in range(len(N)):
+                for pj in range(len(N)):
+                    if pi == pj:
+                        continue
+                    val = mat[pi, pj]
+                    color = "white" if val > vmax * 0.6 else "black"
+                    ax.text(pj, pi, f"{val:,.0f}", ha="center", va="center", fontsize=8, color=color)
 
-    fig.colorbar(im, ax=axes, shrink=0.8, label="Vehicles moved (total, all periods & types)")
-    fig.suptitle("Rebalancing Volume by Hub Pair: Multistage vs MRP", fontsize=14)
+    fig.colorbar(im, ax=axes, shrink=0.6, label="Vehicles moved (total, all periods & types)")
+    fig.suptitle("Rebalancing Volume by Hub Pair: Multistage vs MRP (selected scenarios)", fontsize=14)
     if save:
         fig.savefig(os.path.join(output_dir, "compare_rebalancing_heatmap.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -819,12 +952,12 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
     plot_compare_objective(results, output_dir=output_dir)
     plot_compare_cost_breakdown(results, output_dir=output_dir)
     plot_compare_fleet(results, K, output_dir=output_dir)
-    plot_compare_resource_over_time(tree_model, results, N, K, total_weeks, output_dir=output_dir)
     plot_compare_scenario_costs(results, output_dir=output_dir)
     plot_compare_subcontracting_quantities(results, output_dir=output_dir)
     plot_compare_green_ratio(results, output_dir=output_dir)
-    plot_compare_rebalancing_over_time(tree_model, mrp_model, output_dir=output_dir)
-    plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, output_dir=output_dir)
+    plot_compare_demand_coverage(results, output_dir=output_dir)
+    plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
+    plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
 
     d_real, leaf_prob, _ = build_full_horizon_scenarios(tree_model.tree, N)
     plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=tree_model.tree, output_dir=output_dir)

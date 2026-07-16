@@ -29,17 +29,7 @@ To make the four objective values comparable, all are solved on the same
 probability space: every root-to-leaf path of the scenario tree becomes one
 full-horizon scenario o for the Model.py models, its probability is the
 leaf's actual tree probability (NOT the uniform 1/|O| Model.py assumes by
-default), and cost coefficients are copied verbatim from
-ScenarioTreeVehicleAllocationModel.generate_costs() (same hardcoded values as
-Model.py's generate_data()) via build_cost_params(), the single source of
-truth both builders pull from.
-
-Caveat: the four formulations are not perfectly nested. The tree model's root
-decision (Delta[i,k]) commits fleet directly to hubs, while the Model.py
-models separate an aggregate purchase X[k] from a time-varying (but
-scenario-blind) hub allocation x[i,k,t] — an extra degree of freedom that
-works in their favor. So any gap observed here is, if anything, an
-underestimate of the true value of adapting stage by stage.
+default).
 
 Implementation note: static/MNP/MRP all live on the SAME VehicleAllocationModel
 instance, and each solve_*() call rebuilds self.model from scratch — so
@@ -157,7 +147,7 @@ def build_cost_params(N, K, overrides=None):
     gamma = {0: 300, 1: 800, 2: 732}
     gamma_corr = {k: 1.5 * v for k, v in gamma.items()}
     theta = {i: 0.3 for i in N}
-    S = {0: 50, 1: 50, 2: 50}
+    S = {0: 35, 1: 35, 2: 35}
     g = {0: 1, 1: 1, 2: 0}                              # 1 = green vehicle type
 
     params = dict(q=q, beta=beta, alpha=alpha, gamma=gamma, gamma_corr=gamma_corr,
@@ -726,6 +716,81 @@ def mrp_green_coverage_ratios(m):
 
 
 # ---------------------------------------------------------------------------
+# Per-scenario demand coverage BY SOURCE (purchased incl. rebalancing /
+# planned subcontracting / corrective subcontracting), aggregated across all
+# hubs & weeks. Returns {o: {"demand", "purchased", "planned", "corrective"}}
+# -- q-weighted capacity from each source, plus that scenario's total
+# realized demand, so a caller can express each source as a fraction of
+# demand (e.g. purchased/demand = "the portion of demand met by owned fleet").
+# "purchased" already reflects rebalancing for tree/MRP, since x[...,t] (or
+# x[...,t,o] for MRP) carries that period's net rebalancing per type via the
+# flow-balance/precedence constraint (see build_model_MRP's docstring) --
+# there's no separate rebalancing term to add on top.
+# ---------------------------------------------------------------------------
+
+def tree_scenario_demand_coverage(m):
+    tree = m.tree
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        demand = purchased = planned = corrective = 0.0
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            L = tree.block_length(n)
+            for t_local in range(1, L + 1):
+                for i in m.N:
+                    demand += node.demand[i, t_local]
+                    for k in m.K:
+                        purchased += m.q[k] * m._get_val(f"x[{n},{i},{k},{t_local}]")
+                        corrective += m.q[k] * m._get_val(f"stilde[{n},{i},{k},{t_local}]")
+            planned += L * sum(m.q[k] * m._get_val(f"s[{n},{i},{k}]") for i in m.N for k in m.K)
+        result[o] = {"demand": demand, "purchased": purchased, "planned": planned, "corrective": corrective}
+    return result
+
+
+def static_scenario_demand_coverage(m):
+    """Static's x/s have no time index -- the same standing capacity applies
+    every week, so its per-week contribution is multiplied by len(T) to
+    match demand summed over the same weeks."""
+    purchased = sum(m.q[k] * m._get_val(f"x[{i},{k}]") for i in m.N for k in m.K) * len(m.T)
+    planned = sum(m.q[k] * m._get_val(f"s[{i},{k}]") for i in m.N for k in m.K) * len(m.T)
+    result = {}
+    for o in m.O:
+        demand = sum(m.d_real[i, t, o] for i in m.N for t in m.T)
+        result[o] = {"demand": demand, "purchased": purchased, "planned": planned, "corrective": 0.0}
+    return result
+
+
+def mnp_scenario_demand_coverage(m):
+    _, season_of_week, _ = _season_weeks(m)
+    purchased = sum(m.q[k] * m._get_val(f"x[{i},{k}]") for i in m.N for k in m.K) * len(m.T)
+    result = {}
+    for o in m.O:
+        demand = sum(m.d_real[i, t, o] for i in m.N for t in m.T)
+        planned = sum(m.q[k] * m._get_val(f"s[{i},{k},{season_of_week[t]}]")
+                      for i in m.N for k in m.K for t in m.T)
+        corrective = sum(m.q[k] * m._get_val(f"s_corr[{i},{k},{t},{o}]")
+                          for i in m.N for k in m.K for t in m.T)
+        result[o] = {"demand": demand, "purchased": purchased, "planned": planned, "corrective": corrective}
+    return result
+
+
+def mrp_scenario_demand_coverage(m):
+    _, season_of_week, _ = _season_weeks(m)
+    result = {}
+    for o in m.O:
+        demand = sum(m.d_real[i, t, o] for i in m.N for t in m.T)
+        purchased = sum(m.q[k] * m._get_val(f"x[{i},{k},{t},{o}]") for i in m.N for k in m.K for t in m.T)
+        planned = sum(m.q[k] * m._get_val(f"s[{i},{k},{season_of_week[t]}]")
+                      for i in m.N for k in m.K for t in m.T)
+        corrective = sum(m.q[k] * m._get_val(f"s_corr[{i},{k},{t},{o}]")
+                          for i in m.N for k in m.K for t in m.T)
+        result[o] = {"demand": demand, "purchased": purchased, "planned": planned, "corrective": corrective}
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Result extraction — snapshot before the next solve_*() overwrites self.model
 # ---------------------------------------------------------------------------
 
@@ -745,7 +810,7 @@ def _mrp_resource(m, N, K, total_weeks):
 
 
 def _extract_two_stage_result(m, N, K, cost_fn, resource_fn, scenario_cost_fn, scenario_qty_fn,
-                               green_ratio_fn, qty_by_type_fn):
+                               green_ratio_fn, qty_by_type_fn, demand_coverage_fn):
     status = m.model.status
     solved = status in (2, 9)  # GRB.OPTIMAL, GRB.SUBOPTIMAL/TIME_LIMIT-with-incumbent
     return {
@@ -759,6 +824,7 @@ def _extract_two_stage_result(m, N, K, cost_fn, resource_fn, scenario_cost_fn, s
         "scenario_quantities": scenario_qty_fn(m),
         "green_ratios": green_ratio_fn(m),
         "scenario_quantities_by_type": qty_by_type_fn(m),
+        "demand_coverage": demand_coverage_fn(m),
     }
 
 
@@ -775,6 +841,7 @@ def _tree_result(tree_model, N, K):
         "scenario_quantities": tree_scenario_subcontracting_quantities(tree_model),
         "green_ratios": tree_green_coverage_ratios(tree_model),
         "scenario_quantities_by_type": tree_scenario_quantities_by_type(tree_model),
+        "demand_coverage": tree_scenario_demand_coverage(tree_model),
     }
 
 
@@ -957,7 +1024,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     static_result = _extract_two_stage_result(
         m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
-        static_scenario_quantities_by_type)
+        static_scenario_quantities_by_type, static_scenario_demand_coverage)
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "static.pkl"))
 
@@ -966,7 +1033,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     mnp_result = _extract_two_stage_result(
         m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
-        mnp_scenario_quantities_by_type)
+        mnp_scenario_quantities_by_type, mnp_scenario_demand_coverage)
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "mnp.pkl"))
 
@@ -975,7 +1042,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     mrp_result = _extract_two_stage_result(
         m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
-        mrp_scenario_quantities_by_type
+        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage
     )
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "mrp.pkl"))
@@ -1017,12 +1084,12 @@ if __name__ == "__main__":
     # ]
     hub_correlation= None
     seed = None
-    season_drift = (0.05,0.1,0.1,0.2)
+    season_drift = (0.05,0.2)
     sibling_drift_correlation = 1
-    noise_frac = 0.3
+    noise_frac = 0.05
 
     compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
-            n_hubs=5, n_types=3, hub_correlation=hub_correlation,
+            n_hubs=3, n_types=3, hub_correlation=hub_correlation,
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
             make_plots=True, plot_dir="compare_plots", seed=seed, season_drift=season_drift,
             sibling_drift_correlation=sibling_drift_correlation,
