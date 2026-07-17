@@ -1,4 +1,22 @@
 Multistage (Tree) vs Static vs MNP vs MRP — Cost Summary
+
+hub_correlation= None
+seed = None
+season_drift = (0.05,0.2)
+sibling_drift_correlation = 1
+noise_frac = 0.05
+
+
+q = {0: 720, 1: 2000, 2: 2000}                       # cargo bike, e-van, d-van
+beta = {0: 10538, 1: 32000, 2: 30000}
+alpha = {(i, j, 0): 10 for i in N for j in N}
+alpha.update({(i, j, 1): 50 for i in N for j in N})
+alpha.update({(i, j, 2): 50 for i in N for j in N})
+gamma = {0: 300, 1: 800, 2: 732}
+gamma_corr = {k: 1.5 * v for k, v in gamma.items()}
+theta = {i: 0.3 for i in N}
+S = {0: 35, 1: 35, 2: 35}
+g = {0: 1, 1: 1, 2: 0}                  
 ==========================================================
 
 Multistage (tree)   : 963,380.25

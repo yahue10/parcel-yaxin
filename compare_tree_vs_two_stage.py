@@ -147,7 +147,7 @@ def build_cost_params(N, K, overrides=None):
     gamma = {0: 300, 1: 800, 2: 732}
     gamma_corr = {k: 1.5 * v for k, v in gamma.items()}
     theta = {i: 0.3 for i in N}
-    S = {0: 35, 1: 35, 2: 35}
+    S = {0: 21, 1: 21, 2: 21}
     g = {0: 1, 1: 1, 2: 0}                              # 1 = green vehicle type
 
     params = dict(q=q, beta=beta, alpha=alpha, gamma=gamma, gamma_corr=gamma_corr,
@@ -1077,18 +1077,18 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
 if __name__ == "__main__":
 
-    # hub_correlation = [
-    # [ 1.0, -0.8,  0.0],
-    # [-0.8,  1.0,  0.0],
-    # [ 0.0,  0.0,  1.0],
-    # ]
-    hub_correlation= None
+    hub_correlation = [
+    [ 1.0, -0.8,  0.0],
+    [-0.8,  1.0,  0.0],
+    [ 0.0,  0.0,  1.0],
+    ]
+    # hub_correlation= None
     seed = None
-    season_drift = (0.05,0.2)
+    season_drift = (0.20,0.25)
     sibling_drift_correlation = 1
-    noise_frac = 0.05
+    noise_frac = 0.15
 
-    compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
+    compare(seasons=(1, 2, 3, 4), weeks_per_season= 13, branching=2,
             n_hubs=3, n_types=3, hub_correlation=hub_correlation,
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
             make_plots=True, plot_dir="compare_plots", seed=seed, season_drift=season_drift,

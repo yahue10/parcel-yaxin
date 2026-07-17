@@ -253,7 +253,7 @@ DEMAND_COVERAGE_LABELS = {
 
 def plot_compare_demand_coverage(results, save=True, output_dir="."):
     """
-    One subplot per model (4 rows), one stacked bar per scenario: how much
+    2x2 grid, one subplot per model, one stacked bar per scenario: how much
     of that scenario's total demand (q-weighted capacity, summed across all
     hubs & weeks) was met by each source -- purchased fleet (owned capacity,
     already reflecting any rebalancing for tree/MRP), planned subcontracting,
@@ -265,10 +265,8 @@ def plot_compare_demand_coverage(results, save=True, output_dir="."):
     n_scenarios = max(len(results[m]["demand_coverage"]) for m in MODEL_ORDER)
     x = np.arange(n_scenarios)
 
-    fig, axes = plt.subplots(len(MODEL_ORDER), 1, figsize=(max(10, n_scenarios * 0.5), 4 * len(MODEL_ORDER)),
-                              sharex=True)
-    if len(MODEL_ORDER) == 1:
-        axes = [axes]
+    fig, axes = plt.subplots(2, 2, figsize=(max(12, n_scenarios), 10))
+    axes = axes.flatten()
 
     for ax, m in zip(axes, MODEL_ORDER):
         cov = results[m]["demand_coverage"]
@@ -277,18 +275,21 @@ def plot_compare_demand_coverage(results, save=True, output_dir="."):
             vals = np.array([cov[o][comp] / cov[o]["demand"] if cov[o]["demand"] > 0 else 0.0
                               for o in range(n_scenarios)])
             ax.bar(x, vals, bottom=bottoms, color=DEMAND_COVERAGE_COLORS[comp],
-                   edgecolor="black", linewidth=0.3, label=DEMAND_COVERAGE_LABELS[comp])
+                   edgecolor="black", linewidth=0.3)
             bottoms += vals
         ax.axhline(1.0, color="red", linestyle="--", linewidth=1.2, alpha=0.8)
+        ax.set_xlabel("Scenario")
         ax.set_ylabel("Coverage / demand")
         ax.set_title(MODEL_LABELS[m])
+        ax.set_xticks(x)
+        ax.set_xticklabels([str(o) for o in range(n_scenarios)])
         ax.grid(True, axis="y", alpha=0.3)
 
-    axes[0].legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=9,
-                    title="Source (stacked; red line = demand)")
-    axes[-1].set_xlabel("Scenario")
-    axes[-1].set_xticks(x)
-    axes[-1].set_xticklabels([str(o) for o in range(n_scenarios)])
+    legend_handles = [mpatches.Patch(facecolor=DEMAND_COVERAGE_COLORS[c], edgecolor="black",
+                                      label=DEMAND_COVERAGE_LABELS[c])
+                       for c in ("purchased", "planned", "corrective")]
+    fig.legend(handles=legend_handles, loc="upper left", bbox_to_anchor=(1.0, 0.95), fontsize=9,
+               title="Source (stacked; red line = demand)")
     fig.suptitle("Demand Coverage by Source, per Scenario: Multistage vs Static vs MNP vs MRP", fontsize=14, y=1.0)
     plt.tight_layout()
     if save:

@@ -72,8 +72,8 @@ MAX_WORKERS = 6
 # 1=lock-step). Optional "noise_frac" key: within-season weekly noise scale.
 # Both omit to that function's own defaults — see its docstring.
 INSTANCES = [
-    {"label": "hub10_corr1_b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 42, "season_drift": (0.15, 0.20), 
+    {"label": "hub10_corr2_b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 42, "season_drift": (0.20, 0.25), 
      "sibling_drift_correlation": 1, "noise_frac": 0.05, 
      "hub_correlation": [
     [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
@@ -89,8 +89,8 @@ INSTANCES = [
         ]
         },
 
-    {"label": "hub8_corr1_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.15, 0.20), 
+    {"label": "hub8_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
      "sibling_drift_correlation": 1, "noise_frac": 0.05,
      "hub_correlation": [
     [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
@@ -102,9 +102,9 @@ INSTANCES = [
     [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5],
     [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0],
         ]},
-    {"label": "hub8_corr2_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.15, 0.20), 
-     "sibling_drift_correlation": 1, "noise_frac": 0.05,
+    {"label": "hub8_corr4_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
+     "sibling_drift_correlation": 1, "noise_frac": 0.15,
      "hub_correlation": [
     [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
     [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
