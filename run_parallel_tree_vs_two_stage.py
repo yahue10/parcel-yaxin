@@ -144,7 +144,7 @@ def solve_instance(instance_cfg):
         static_scenario_quantities_by_type, mnp_scenario_quantities_by_type,
         mrp_scenario_quantities_by_type,
         static_scenario_demand_coverage, mnp_scenario_demand_coverage, mrp_scenario_demand_coverage,
-        _extract_two_stage_result, _tree_result, _flat_resource, _mrp_resource,
+        _extract_two_stage_result, _tree_result, _flat_resource, _mrp_resource, save_solve_log,
     )
     from plots_tree_vs_two_stage import plot_all_comparisons
 
@@ -268,6 +268,7 @@ def solve_instance(instance_cfg):
     d_real, _, _ = build_full_horizon_scenarios(tree, N)
     save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"))
     save_scenario_quantities_by_type(results, K, os.path.join(exp_dir, "scenario_quantities.csv"))
+    save_solve_log(exp_dir, results, result["solve_times"], label=label)
 
     with open(os.path.join(exp_dir, "result.pkl"), "wb") as f:
         pickle.dump(result, f)

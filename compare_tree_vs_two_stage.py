@@ -42,6 +42,7 @@ import csv
 import os
 import pickle
 import random
+import time
 
 import numpy as np
 
@@ -604,6 +605,58 @@ def save_all_variables(m, output_path):
 
 
 # ---------------------------------------------------------------------------
+# Gurobi solve log — status / objective / gap / solve time, per model
+# ---------------------------------------------------------------------------
+
+GRB_STATUS_NAMES = {
+    1: "LOADED", 2: "OPTIMAL", 3: "INFEASIBLE", 4: "INF_OR_UNBD", 5: "UNBOUNDED",
+    6: "CUTOFF", 7: "ITERATION_LIMIT", 8: "NODE_LIMIT", 9: "TIME_LIMIT",
+    10: "SOLUTION_LIMIT", 11: "INTERRUPTED", 12: "NUMERIC", 13: "SUBOPTIMAL",
+    14: "INPROGRESS", 15: "USER_OBJ_LIMIT",
+}
+
+
+def save_solve_log(exp_dir, results, solve_times, label=""):
+    """
+    Saves each model's Gurobi solve outcome (status, objective, MIP gap,
+    solve time) both as one CSV per model (<exp_dir>/solve_log/<model>.csv,
+    one row) and as a single combined <exp_dir>/solve_summary.csv (one row
+    per model), so a run's outcome can be checked at a glance without
+    unpickling result.pkl.
+    """
+    log_dir = os.path.join(exp_dir, "solve_log")
+    os.makedirs(log_dir, exist_ok=True)
+    fieldnames = ["label", "model", "status", "status_desc", "obj", "gap", "solve_time_sec"]
+
+    rows = []
+    for model_key in MODEL_ORDER:
+        r = results[model_key]
+        status = r.get("status")
+        row = {
+            "label": label,
+            "model": model_key,
+            "status": status,
+            "status_desc": GRB_STATUS_NAMES.get(status, f"STATUS_{status}"),
+            "obj": r.get("obj"),
+            "gap": r.get("gap"),
+            "solve_time_sec": solve_times.get(model_key),
+        }
+        rows.append(row)
+        with open(os.path.join(log_dir, f"{model_key}.csv"), "w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerow(row)
+
+    summary_path = os.path.join(exp_dir, "solve_summary.csv")
+    with open(summary_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+    print(f"Solve log saved to {log_dir}/ and {summary_path}")
+
+
+# ---------------------------------------------------------------------------
 # Green-vehicle coverage check (theta constraint), per (hub, week, scenario)
 # ---------------------------------------------------------------------------
 #
@@ -1011,8 +1064,10 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
           f"branching {branching} -> {n_leaves} full-horizon paths ({total_weeks} weeks total)")
 
     print("\n--- Solving multistage scenario-tree model ---")
+    t0 = time.time()
     tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
     tree_model.solve(params=solver_params)
+    t_tree = time.time() - t0
     if make_plots:
         save_all_variables(tree_model, os.path.join(plot_dir, "variables", "tree.pkl"))
 
@@ -1020,7 +1075,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     m, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
 
     print("Static...")
+    t0 = time.time()
     m.solve_static(params=solver_params)
+    t_static = time.time() - t0
     static_result = _extract_two_stage_result(
         m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
@@ -1029,7 +1086,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         save_all_variables(m, os.path.join(plot_dir, "variables", "static.pkl"))
 
     print("MNP...")
+    t0 = time.time()
     m.solve_MNP(params=solver_params)
+    t_mnp = time.time() - t0
     mnp_result = _extract_two_stage_result(
         m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
@@ -1038,7 +1097,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         save_all_variables(m, os.path.join(plot_dir, "variables", "mnp.pkl"))
 
     print("MRP...")
+    t0 = time.time()
     m.solve_MRP(params=solver_params)
+    t_mrp = time.time() - t0
     mrp_result = _extract_two_stage_result(
         m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
@@ -1055,6 +1116,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         "mnp": mnp_result,
         "mrp": mrp_result,
     }
+    solve_times = {"tree": t_tree, "static": t_static, "mnp": t_mnp, "mrp": t_mrp}
 
     report(results, K)
     report_scenario_costs(results)
@@ -1070,6 +1132,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         save_flat_scenarios(d_real, leaf_prob, N, total_weeks,
                              os.path.join(plot_dir, "flat_scenarios.csv"))
         save_scenario_quantities_by_type(results, K, os.path.join(plot_dir, "scenario_quantities.csv"))
+        save_solve_log(plot_dir, results, solve_times)
 
     return tree_model, m, results
 
