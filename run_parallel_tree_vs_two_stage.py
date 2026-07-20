@@ -72,48 +72,38 @@ MAX_WORKERS = 6
 # 1=lock-step). Optional "noise_frac" key: within-season weekly noise scale.
 # Both omit to that function's own defaults — see its docstring.
 INSTANCES = [
-    {"label": "hub10_corr2_b2_seed42", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 42, "season_drift": (0.20, 0.25), 
-     "sibling_drift_correlation": 1, "noise_frac": 0.05, 
-     "hub_correlation": [
-    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0,  0.4],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.4,  1.0],
-        ]
-        },
-
-    {"label": "hub8_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
+    {"label": "hub4_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 4, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
      "sibling_drift_correlation": 1, "noise_frac": 0.05,
      "hub_correlation": [
-    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0],
+    [ 1.0, -0.7,  0.0,  0.0],
+    [-0.7,  1.0,  0.0,  0.0],
+    [ 0.0,  0.0,  1.0,  -0.6],
+    [ 0.0,  0.0,  -0.6,  1.0],
         ]},
-    {"label": "hub8_corr4_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 8, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
+
+    {"label": "hub6_corr4_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
      "sibling_drift_correlation": 1, "noise_frac": 0.15,
      "hub_correlation": [
-    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  1.0,  0.3,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  0.3,  1.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0,  1.0, -0.5],
-    [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0, -0.5,  1.0],
+    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0],
+    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0],
+    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3],
+    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0],
+        ]},
+
+    {"label": "hub6_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
+     "sibling_drift_correlation": 1, "noise_frac": 0.05,
+     "hub_correlation": [
+    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0],
+    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0],
+    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0],
+    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0],
+    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3],
+    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0],
         ]},
 ]
 
@@ -145,6 +135,7 @@ def solve_instance(instance_cfg):
         mrp_scenario_quantities_by_type,
         static_scenario_demand_coverage, mnp_scenario_demand_coverage, mrp_scenario_demand_coverage,
         _extract_two_stage_result, _tree_result, _flat_resource, _mrp_resource, save_solve_log,
+        _params_with_log_file,
     )
     from plots_tree_vs_two_stage import plot_all_comparisons
 
@@ -197,7 +188,8 @@ def solve_instance(instance_cfg):
     # --- Multistage scenario-tree model ---
     t0 = time.time()
     tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
-    tree_model.solve(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    tree_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "tree.log"))
+    tree_model.solve(params=tree_params, options=GUROBI_OPTIONS)
     t_tree = time.time() - t0
     print(f"[{label}] Tree model done in {t_tree:.1f}s "
           f"obj={tree_model.model.ObjVal if tree_model.model.status in (2, 9) else 'N/A'}")
@@ -207,7 +199,8 @@ def solve_instance(instance_cfg):
     m, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
 
     t0 = time.time()
-    m.solve_static(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    static_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "static.log"))
+    m.solve_static(params=static_params, options=GUROBI_OPTIONS)
     static_result = _extract_two_stage_result(
         m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
@@ -217,7 +210,8 @@ def solve_instance(instance_cfg):
     print(f"[{label}] Static done in {t_static:.1f}s obj={static_result['obj']}")
 
     t0 = time.time()
-    m.solve_MNP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    mnp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mnp.log"))
+    m.solve_MNP(params=mnp_params, options=GUROBI_OPTIONS)
     mnp_result = _extract_two_stage_result(
         m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
@@ -227,7 +221,8 @@ def solve_instance(instance_cfg):
     print(f"[{label}] MNP done in {t_mnp:.1f}s obj={mnp_result['obj']}")
 
     t0 = time.time()
-    m.solve_MRP(params=SOLVER_PARAMS, options=GUROBI_OPTIONS)
+    mrp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mrp.log"))
+    m.solve_MRP(params=mrp_params, options=GUROBI_OPTIONS)
     mrp_result = _extract_two_stage_result(
         m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,

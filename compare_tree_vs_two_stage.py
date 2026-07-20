@@ -616,6 +616,18 @@ GRB_STATUS_NAMES = {
 }
 
 
+def _params_with_log_file(params, log_path):
+    """Returns a copy of `params` with Gurobi's LogFile parameter set to
+    log_path -- Gurobi writes the full solver log there independently of
+    OutputFlag (so it's captured even with console output suppressed).
+    Copies rather than mutates, since the same params dict is normally
+    reused across all 4 solves and each needs its own LogFile."""
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    merged = dict(params) if params else {}
+    merged["LogFile"] = log_path
+    return merged
+
+
 def save_solve_log(exp_dir, results, solve_times, label=""):
     """
     Saves each model's Gurobi solve outcome (status, objective, MIP gap,
@@ -1066,7 +1078,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     print("\n--- Solving multistage scenario-tree model ---")
     t0 = time.time()
     tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
-    tree_model.solve(params=solver_params)
+    tree_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "tree.log"))
+                   if make_plots else solver_params)
+    tree_model.solve(params=tree_params)
     t_tree = time.time() - t0
     if make_plots:
         save_all_variables(tree_model, os.path.join(plot_dir, "variables", "tree.pkl"))
@@ -1076,7 +1090,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
     print("Static...")
     t0 = time.time()
-    m.solve_static(params=solver_params)
+    static_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "static.log"))
+                      if make_plots else solver_params)
+    m.solve_static(params=static_params)
     t_static = time.time() - t0
     static_result = _extract_two_stage_result(
         m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
@@ -1087,7 +1103,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
     print("MNP...")
     t0 = time.time()
-    m.solve_MNP(params=solver_params)
+    mnp_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "mnp.log"))
+                  if make_plots else solver_params)
+    m.solve_MNP(params=mnp_params)
     t_mnp = time.time() - t0
     mnp_result = _extract_two_stage_result(
         m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
@@ -1098,7 +1116,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
     print("MRP...")
     t0 = time.time()
-    m.solve_MRP(params=solver_params)
+    mrp_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "mrp.log"))
+                  if make_plots else solver_params)
+    m.solve_MRP(params=mrp_params)
     t_mrp = time.time() - t0
     mrp_result = _extract_two_stage_result(
         m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
