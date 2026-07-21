@@ -29,13 +29,16 @@ You can configure:
     - SOLVER_PARAMS: Gurobi solver parameters (TimeLimit, MIPGap, Threads, ...)
 """
 
+
+
+
 import os
 import time
 import json
 import pickle
 import traceback
 from datetime import datetime
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -197,22 +200,34 @@ def solve_instance(instance_cfg):
         "seed": seed, "exp_dir": exp_dir,
     }
 
-    # --- Multistage scenario-tree model ---
-    t0 = time.time()
-    tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
-    tree_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "tree.log"))
-    tree_model.solve(params=tree_params, options=GUROBI_OPTIONS)
-    t_tree = time.time() - t0
-    print(f"[{label}] Tree model done in {t_tree:.1f}s "
-          f"obj={tree_model.model.ObjVal if tree_model.model.status in (2, 9) else 'N/A'}")
-    save_all_variables(tree_model, os.path.join(exp_dir, "variables", "tree.pkl"))
+    wall_clock_start = time.time()
 
-    # --- Static / MNP / MRP, sequentially on the SAME shared model instance ---
+    # --- Multistage scenario-tree model: build now, solve in a background
+    # thread so it overlaps with the static/MNP/MRP chain below. tree_model
+    # is a fully separate Gurobi Model/Env from `m` (the two-stage model),
+    # so there's no shared mutable state to race on, and Gurobi releases the
+    # GIL during optimize() -- this is genuine parallelism, not just
+    # concurrency. Tree is often the single slowest solve, so overlapping it
+    # removes it from the critical path entirely instead of adding to it.
+    tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
+
+    def _solve_tree_model():
+        t0 = time.time()
+        tree_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "tree.log"))
+        tree_model.solve(params=tree_params, options=GUROBI_OPTIONS, label=f"{label}:tree")
+        save_all_variables(tree_model, os.path.join(exp_dir, "variables", "tree.pkl"), label=label)
+        return time.time() - t0
+
+    tree_executor = ThreadPoolExecutor(max_workers=1)
+    tree_future = tree_executor.submit(_solve_tree_model)
+
+    # --- Static / MNP / MRP, sequentially on the SAME shared model instance,
+    # running concurrently with the tree solve above ---
     m, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
 
     t0 = time.time()
     static_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "static.log"))
-    m.solve_static(params=static_params, options=GUROBI_OPTIONS)
+    m.solve_static(params=static_params, options=GUROBI_OPTIONS, label=f"{label}:static")
     static_result = _extract_two_stage_result(
         m, N, K, total_weeks, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
@@ -221,13 +236,13 @@ def solve_instance(instance_cfg):
         static_scenario_rebalancing_quantities,
         static_outbound_by_hub_season, static_corrective_by_hub_season,
         static_scenario_outbound_by_hub_season, static_scenario_corrective_by_hub_season)
-    save_all_variables(m, os.path.join(exp_dir, "variables", "static.pkl"))
+    save_all_variables(m, os.path.join(exp_dir, "variables", "static.pkl"), label=label)
     t_static = time.time() - t0
     print(f"[{label}] Static done in {t_static:.1f}s obj={static_result['obj']}")
 
     t0 = time.time()
     mnp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mnp.log"))
-    m.solve_MNP(params=mnp_params, options=GUROBI_OPTIONS)
+    m.solve_MNP(params=mnp_params, options=GUROBI_OPTIONS, label=f"{label}:mnp")
     mnp_result = _extract_two_stage_result(
         m, N, K, total_weeks, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
@@ -236,13 +251,13 @@ def solve_instance(instance_cfg):
         mnp_scenario_rebalancing_quantities,
         mnp_outbound_by_hub_season, mnp_corrective_by_hub_season,
         mnp_scenario_outbound_by_hub_season, mnp_scenario_corrective_by_hub_season)
-    save_all_variables(m, os.path.join(exp_dir, "variables", "mnp.pkl"))
+    save_all_variables(m, os.path.join(exp_dir, "variables", "mnp.pkl"), label=label)
     t_mnp = time.time() - t0
     print(f"[{label}] MNP done in {t_mnp:.1f}s obj={mnp_result['obj']}")
 
     t0 = time.time()
     mrp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mrp.log"))
-    m.solve_MRP(params=mrp_params, options=GUROBI_OPTIONS)
+    m.solve_MRP(params=mrp_params, options=GUROBI_OPTIONS, label=f"{label}:mrp")
     mrp_result = _extract_two_stage_result(
         m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
@@ -252,11 +267,18 @@ def solve_instance(instance_cfg):
         mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
         mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
     )
-    save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"))
+    save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"), label=label)
     t_mrp = time.time() - t0
     print(f"[{label}] MRP done in {t_mrp:.1f}s obj={mrp_result['obj']}")
     # m is now left in its MRP-solved state — plot_all_comparisons' rebalancing
     # plots rely on being able to query it live, right after this call.
+
+    # Join the background tree solve (usually already done by now, since it
+    # started before static/MNP/MRP and often takes comparably long).
+    t_tree = tree_future.result()
+    tree_executor.shutdown()
+    print(f"[{label}] Tree model done in {t_tree:.1f}s "
+          f"obj={tree_model.model.ObjVal if tree_model.model.status in (2, 9) else 'N/A'}")
 
     results = {
         "tree": _tree_result(tree_model, N, K, total_weeks),
@@ -270,7 +292,10 @@ def solve_instance(instance_cfg):
     result["n_leaves"] = len(leaf_prob)
     result["total_weeks"] = total_weeks
     result["solve_times"] = {"tree": t_tree, "static": t_static, "mnp": t_mnp, "mrp": t_mrp}
-    result["total_time"] = t_tree + t_static + t_mnp + t_mrp
+    # Wall-clock time for this instance, not the sum of the 4 individual solve
+    # times above -- tree now runs concurrently with static/MNP/MRP, so the
+    # sum would double-count the overlapped portion.
+    result["total_time"] = time.time() - wall_clock_start
 
     tree_obj = results["tree"]["obj"]
     mrp_obj = results["mrp"]["obj"]
@@ -282,26 +307,26 @@ def solve_instance(instance_cfg):
           f"(tree={t_tree:.1f}s, static={t_static:.1f}s, mnp={t_mnp:.1f}s, mrp={t_mrp:.1f}s)")
 
     if all(results[k]["obj"] is not None for k in ("tree", "static", "mnp", "mrp")):
-        plot_all_comparisons(tree_model, m, results, N, K, total_weeks, output_dir=exp_dir)
+        plot_all_comparisons(tree_model, m, results, N, K, total_weeks, output_dir=exp_dir, instance_label=label)
 
     d_real, _, _ = build_full_horizon_scenarios(tree, N)
-    save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"))
-    save_scenario_quantities_by_type(results, K, os.path.join(exp_dir, "scenario_quantities.csv"))
-    save_subcontracting_extremes_table(results, K, os.path.join(exp_dir, "subcontracting_extremes.csv"))
-    save_rebalancing_movement_table(results, os.path.join(exp_dir, "rebalancing_movements.csv"))
+    save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"), label=label)
+    save_scenario_quantities_by_type(results, K, os.path.join(exp_dir, "scenario_quantities.csv"), label=label)
+    save_subcontracting_extremes_table(results, K, os.path.join(exp_dir, "subcontracting_extremes.csv"), label=label)
+    save_rebalancing_movement_table(results, os.path.join(exp_dir, "rebalancing_movements.csv"), label=label)
     B = sorted(tree.e)
     save_hub_season_table({mk: results[mk]["outbound_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
                            N, B, os.path.join(exp_dir, "outbound_by_hub_season.csv"),
-                           value_label="expected_outbound_qty")
+                           value_label="expected_outbound_qty", label=label)
     save_hub_season_table({mk: results[mk]["corrective_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
                            N, B, os.path.join(exp_dir, "corrective_by_hub_season.csv"),
-                           value_label="expected_corrective_qty")
+                           value_label="expected_corrective_qty", label=label)
     save_hub_season_scenario_table(
         {mk: results[mk]["scenario_outbound_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
-        N, B, os.path.join(exp_dir, "outbound_by_hub_season_scenario.csv"), value_label="outbound_qty")
+        N, B, os.path.join(exp_dir, "outbound_by_hub_season_scenario.csv"), value_label="outbound_qty", label=label)
     save_hub_season_scenario_table(
         {mk: results[mk]["scenario_corrective_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
-        N, B, os.path.join(exp_dir, "corrective_by_hub_season_scenario.csv"), value_label="corrective_qty")
+        N, B, os.path.join(exp_dir, "corrective_by_hub_season_scenario.csv"), value_label="corrective_qty", label=label)
     save_solve_log(exp_dir, results, result["solve_times"], label=label)
 
     with open(os.path.join(exp_dir, "result.pkl"), "wb") as f:

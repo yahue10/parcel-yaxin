@@ -493,13 +493,16 @@ class VehicleAllocationModel:
 
     
         
-    def solve_MRP(self, params=None, options=None):
+    def solve_MRP(self, params=None, options=None, label=""):
         """
         Build and solve the model.
 
         params : dict – Gurobi parameters, e.g.
             {"TimeLimit": 500, "MIPGap": 0.01, "Threads": 4,
              "OutputFlag": 0, "LogFile": "gurobi_log.txt"}
+        label : optional prefix (e.g. an instance/model tag) put in front of
+            this solve's outcome line, so concurrent solves' output stays
+            distinguishable in the terminal.
         """
         if options is not None:
             env = Env(params=options)
@@ -512,25 +515,28 @@ class VehicleAllocationModel:
             for name, value in params.items():
                 self.model.setParam(name, value)
 
-        print('opt start')
         self.model.optimize()
 
+        tag = f"[{label}] " if label else ""
         if self.model.status == GRB.OPTIMAL:
-            print(f"Optimal solution found: {self.model.ObjVal}")
+            print(f"{tag}Optimal solution found: {self.model.ObjVal}")
         elif self.model.status == GRB.TIME_LIMIT:
-            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+            print(f"{tag}Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
         elif self.model.status == GRB.INFEASIBLE:
-            print("Model is infeasible.")
+            print(f"{tag}Model is infeasible.")
         else:
-            print(f"Optimization ended with status {self.model.status}")
+            print(f"{tag}Optimization ended with status {self.model.status}")
 
-    def solve_static(self, params=None, options=None):
+    def solve_static(self, params=None, options=None, label=""):
         """
         Build and solve the model.
 
         params : dict – Gurobi parameters, e.g.
             {"TimeLimit": 500, "MIPGap": 0.01, "Threads": 4,
              "OutputFlag": 0, "LogFile": "gurobi_log.txt"}
+        label : optional prefix (e.g. an instance/model tag) put in front of
+            this solve's outcome line, so concurrent solves' output stays
+            distinguishable in the terminal.
         """
         if options is not None:
             env = Env(params=options)
@@ -542,25 +548,28 @@ class VehicleAllocationModel:
             for name, value in params.items():
                 self.model.setParam(name, value)
 
-        print('opt start')
         self.model.optimize()
 
+        tag = f"[{label}] " if label else ""
         if self.model.status == GRB.OPTIMAL:
-            print(f"Optimal solution found: {self.model.ObjVal}")
+            print(f"{tag}Optimal solution found: {self.model.ObjVal}")
         elif self.model.status == GRB.TIME_LIMIT:
-            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+            print(f"{tag}Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
         elif self.model.status == GRB.INFEASIBLE:
-            print("Model is infeasible.")
+            print(f"{tag}Model is infeasible.")
         else:
-            print(f"Optimization ended with status {self.model.status}")
+            print(f"{tag}Optimization ended with status {self.model.status}")
 
-    def solve_MNP(self, params=None, options=None):
+    def solve_MNP(self, params=None, options=None, label=""):
         """
         Build and solve the MNP model (no rebalancing, static x, time-varying s).
 
         params : dict – Gurobi parameters, e.g.
             {"TimeLimit": 500, "MIPGap": 0.01, "Threads": 4,
              "OutputFlag": 0, "LogFile": "gurobi_log.txt"}
+        label : optional prefix (e.g. an instance/model tag) put in front of
+            this solve's outcome line, so concurrent solves' output stays
+            distinguishable in the terminal.
         """
         if options is not None:
             env = Env(params=options)
@@ -572,17 +581,17 @@ class VehicleAllocationModel:
             for name, value in params.items():
                 self.model.setParam(name, value)
 
-        print('opt start')
         self.model.optimize()
 
+        tag = f"[{label}] " if label else ""
         if self.model.status == GRB.OPTIMAL:
-            print(f"Optimal solution found: {self.model.ObjVal}")
+            print(f"{tag}Optimal solution found: {self.model.ObjVal}")
         elif self.model.status == GRB.TIME_LIMIT:
-            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+            print(f"{tag}Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
         elif self.model.status == GRB.INFEASIBLE:
-            print("Model is infeasible.")
+            print(f"{tag}Model is infeasible.")
         else:
-            print(f"Optimization ended with status {self.model.status}")
+            print(f"{tag}Optimization ended with status {self.model.status}")
 
 
     def set_fleet_cap_from_static(self):

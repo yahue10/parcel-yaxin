@@ -354,7 +354,12 @@ class ScenarioTreeVehicleAllocationModel:
 
         return m
 
-    def solve(self, params=None, options=None):
+    def solve(self, params=None, options=None, label=""):
+        """
+        label : optional prefix (e.g. an instance/model tag) put in front of
+            this solve's outcome line, so concurrent solves' output stays
+            distinguishable in the terminal.
+        """
         env = Env(params=options) if options is not None else Env()
         self.build_model(env=env)
 
@@ -362,17 +367,17 @@ class ScenarioTreeVehicleAllocationModel:
             for name, value in params.items():
                 self.model.setParam(name, value)
 
-        print("opt start")
         self.model.optimize()
 
+        tag = f"[{label}] " if label else ""
         if self.model.status == GRB.OPTIMAL:
-            print(f"Optimal solution found: {self.model.ObjVal}")
+            print(f"{tag}Optimal solution found: {self.model.ObjVal}")
         elif self.model.status == GRB.TIME_LIMIT:
-            print(f"Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
+            print(f"{tag}Time limit reached. Best objective: {self.model.ObjVal}, Gap: {self.model.MIPGap:.2%}")
         elif self.model.status == GRB.INFEASIBLE:
-            print("Model is infeasible.")
+            print(f"{tag}Model is infeasible.")
         else:
-            print(f"Optimization ended with status {self.model.status}")
+            print(f"{tag}Optimization ended with status {self.model.status}")
 
     def _get_val(self, var_name):
         var = self.model.getVarByName(var_name)

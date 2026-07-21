@@ -626,7 +626,7 @@ def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, save
     return fig
 
 
-def plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=None, output_dir="."):
+def plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=None, output_dir=".", instance_label=""):
     """
     One figure PER scenario, two subplots stacked top to bottom: top shows
     every hub's demand over the full horizon for that scenario (same
@@ -669,7 +669,8 @@ def plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=None, output
         fig.savefig(os.path.join(subdir, f"scenario_{o}.png"), dpi=150, bbox_inches="tight")
         plt.close(fig)
 
-    print(f"Per-scenario demand plots saved to {subdir}/ ({len(leaf_prob)} figures)")
+    tag = f"[{instance_label}] " if instance_label else ""
+    print(f"{tag}Per-scenario demand plots saved to {subdir}/ ({len(leaf_prob)} figures)")
 
 
 # ---------------------------------------------------------------------------
@@ -920,7 +921,7 @@ def _plot_resource_decomposition_model(model_key, decomp, residual, N, K, total_
     return n_scenarios
 
 
-def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir="."):
+def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=".", instance_label=""):
     """Tree & MRP only (see module note above). One figure per (model,
     scenario), saved under resource_decomposition/<tree|mrp>/scenario_<o>.png."""
     tree_decomp, n_tree = _tree_resource_decomposition(tree_model)
@@ -934,16 +935,22 @@ def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_w
     _plot_resource_decomposition_model("mrp", mrp_decomp, mrp_residual, N, K, total_weeks,
                                         n_mrp, output_dir, boundaries=boundaries)
 
-    print(f"Resource decomposition plots saved to "
+    tag = f"[{instance_label}] " if instance_label else ""
+    print(f"{tag}Resource decomposition plots saved to "
           f"{os.path.join(output_dir, 'resource_decomposition')}/ ({n_tree + n_mrp} figures)")
 
 
-def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, output_dir="."):
+def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, output_dir=".", instance_label=""):
     """Generate all comparison plots and a text cost summary in output_dir.
 
     `mrp_model` must be the shared VehicleAllocationModel instance right after
     solve_MRP() was called on it (i.e. still in its MRP-solved state) — the
     rebalancing plots query it live.
+
+    instance_label : optional prefix put in front of this function's own
+        confirmation prints (and threaded through to the two sub-functions
+        below that print their own), so concurrent runs' output stays
+        distinguishable in the terminal.
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -958,8 +965,10 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
     plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
 
     d_real, leaf_prob, _ = build_full_horizon_scenarios(tree_model.tree, N)
-    plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=tree_model.tree, output_dir=output_dir)
-    plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir)
+    plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=tree_model.tree, output_dir=output_dir,
+                             instance_label=instance_label)
+    plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir,
+                                             instance_label=instance_label)
 
     tree_obj = results["tree"]["obj"]
 
@@ -1042,6 +1051,7 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
             else:
                 f.write(f"{MODEL_LABELS[m]:<20}{violations:>12}{ratios.min():>12.3f}"
                         f"{ratios.mean():>12.3f}{ratios.max():>12.3f}\n")
-    print(f"Cost summary saved to {summary_path}")
+    tag = f"[{instance_label}] " if instance_label else ""
+    print(f"{tag}Cost summary saved to {summary_path}")
 
-    print(f"Comparison plots saved to {output_dir}/")
+    print(f"{tag}Comparison plots saved to {output_dir}/")

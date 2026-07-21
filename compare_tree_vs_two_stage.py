@@ -43,6 +43,7 @@ import os
 import pickle
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
@@ -110,12 +111,15 @@ def build_d_pred(d_real, leaf_prob, N, total_weeks):
     return d_pred
 
 
-def save_flat_scenarios(d_real, leaf_prob, N, total_weeks, output_path):
+def save_flat_scenarios(d_real, leaf_prob, N, total_weeks, output_path, label=""):
     """
     Write the flattened full-horizon scenario set (the same d_real/leaf_prob
     every two-stage model is built from — see build_full_horizon_scenarios)
     to a CSV, one row per (scenario, hub, week): scenario, probability, hub,
     week, demand.
+
+    label : optional prefix (e.g. an instance tag) put in front of the
+        confirmation print, so concurrent runs' output stays distinguishable.
     """
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
@@ -125,7 +129,8 @@ def save_flat_scenarios(d_real, leaf_prob, N, total_weeks, output_path):
             for i in N:
                 for t in range(total_weeks):
                     writer.writerow([o, prob, i, t, d_real[i, t, o]])
-    print(f"Flat scenario data saved to {output_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}Flat scenario data saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -541,7 +546,7 @@ def mrp_scenario_quantities_by_type(m):
     return result
 
 
-def save_scenario_quantities_by_type(results, K, output_path):
+def save_scenario_quantities_by_type(results, K, output_path, label=""):
     """
     Write per-scenario, per-vehicle-type purchase/planned/corrective
     quantities for all 4 models to a CSV: model, scenario, type, purchase,
@@ -557,7 +562,8 @@ def save_scenario_quantities_by_type(results, K, output_path):
                 for k in K:
                     q = qbt[o, k]
                     writer.writerow([MODEL_LABELS[m], o, k, q["purchase"], q["planned"], q["corrective"]])
-    print(f"Per-scenario, per-type quantities saved to {output_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}Per-scenario, per-type quantities saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -660,7 +666,7 @@ def _fmt_periods(periods):
     return "constant (n/a)" if periods is None else ";".join(str(p) for p in periods)
 
 
-def save_subcontracting_extremes_table(results, K, output_path):
+def save_subcontracting_extremes_table(results, K, output_path, label=""):
     """Per scenario, per model, per vehicle type: total subcontracted
     (planned + corrective) vehicles across the whole horizon, the week(s)
     with that type's own highest single-week subcontracted quantity, and
@@ -686,7 +692,8 @@ def save_subcontracting_extremes_table(results, K, output_path):
                         e["total_all_types"], e["peak_week_total"],
                         _fmt_periods(e["max_period_overall"]),
                     ])
-    print(f"Subcontracting period-extremes table saved to {output_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}Subcontracting period-extremes table saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -744,7 +751,7 @@ def mrp_scenario_rebalancing_quantities(m):
     return result
 
 
-def save_rebalancing_movement_table(results, output_path):
+def save_rebalancing_movement_table(results, output_path, label=""):
     """Per scenario, per model: total outbound rebalancing and redeployment
     vehicle-unit movements (raw counts, not cost-weighted). Static/MNP
     always report 0 for both -- neither model has a rebalancing lever."""
@@ -756,7 +763,8 @@ def save_rebalancing_movement_table(results, output_path):
             for o in sorted(qty):
                 r, d = qty[o]["rebalancing"], qty[o]["redeployment"]
                 writer.writerow([MODEL_LABELS[model_key], o, r, d, r + d])
-    print(f"Rebalancing/redeployment movement table saved to {output_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}Rebalancing/redeployment movement table saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -854,7 +862,7 @@ def mrp_corrective_by_hub_season(m, total_weeks):
     return mnp_corrective_by_hub_season(m, total_weeks)
 
 
-def save_hub_season_table(by_model, N, B, output_path, value_label="qty"):
+def save_hub_season_table(by_model, N, B, output_path, value_label="qty", label=""):
     """by_model: {model_key: {(i, b): qty}} (see *_outbound_by_hub_season /
     *_corrective_by_hub_season above). Writes model, hub, season, <value_label>."""
     with open(output_path, "w", newline="") as f:
@@ -865,7 +873,8 @@ def save_hub_season_table(by_model, N, B, output_path, value_label="qty"):
             for i in N:
                 for b in B:
                     writer.writerow([MODEL_LABELS[model_key], i, b, d[i, b]])
-    print(f"{value_label} by hub/season saved to {output_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}{value_label} by hub/season saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -957,7 +966,7 @@ def mrp_scenario_corrective_by_hub_season(m, total_weeks):
     return mnp_scenario_corrective_by_hub_season(m, total_weeks)
 
 
-def save_hub_season_scenario_table(by_model, N, B, output_path, value_label="qty"):
+def save_hub_season_scenario_table(by_model, N, B, output_path, value_label="qty", label=""):
     """by_model: {model_key: {(i, b, o): qty}} (see *_scenario_outbound_by_hub_season /
     *_scenario_corrective_by_hub_season above). Writes model, hub, season, scenario, <value_label>."""
     with open(output_path, "w", newline="") as f:
@@ -970,7 +979,8 @@ def save_hub_season_scenario_table(by_model, N, B, output_path, value_label="qty
                 for b in B:
                     for o in range(n_scenarios):
                         writer.writerow([MODEL_LABELS[model_key], i, b, o, d[i, b, o]])
-    print(f"{value_label} by hub/season/scenario saved to {output_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}{value_label} by hub/season/scenario saved to {output_path}")
 
 
 def _parse_var_index(token):
@@ -980,7 +990,7 @@ def _parse_var_index(token):
         return token
 
 
-def save_all_variables(m, output_path):
+def save_all_variables(m, output_path, label=""):
     """
     Dump every decision variable's solved value for this model into a nested
     dict keyed by variable prefix then parsed index (e.g. "x[5,2,1,3]" ->
@@ -995,10 +1005,17 @@ def save_all_variables(m, output_path):
     scratch, discarding the previous formulation's variables entirely (same
     eager-extraction requirement as _extract_two_stage_result() -- see the
     module docstring).
+
+    label : optional instance tag put in front of the confirmation print,
+        combined with the model name derived from output_path's basename
+        (e.g. ".../variables/tree.pkl" -> "tree"), so concurrent solves'
+        output stays distinguishable in the terminal.
     """
+    model_name = os.path.splitext(os.path.basename(output_path))[0]
+    tag = f"[{label}:{model_name}] " if label else f"[{model_name}] "
     status = m.model.status
     if status not in (2, 9):  # GRB.OPTIMAL, GRB.SUBOPTIMAL/TIME_LIMIT-with-incumbent
-        print(f"Skipping variable dump for {output_path}: not solved (status {status})")
+        print(f"{tag}Skipping variable dump for {output_path}: not solved (status {status})")
         return
     variables = {}
     for var in m.model.getVars():
@@ -1014,7 +1031,7 @@ def save_all_variables(m, output_path):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "wb") as f:
         pickle.dump(variables, f)
-    print(f"All variable values saved to {output_path}")
+    print(f"{tag}All variable values saved to {output_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1033,11 +1050,17 @@ def _params_with_log_file(params, log_path):
     """Returns a copy of `params` with Gurobi's LogFile parameter set to
     log_path -- Gurobi writes the full solver log there independently of
     OutputFlag (so it's captured even with console output suppressed).
+    Also sets LogToConsole=0: whenever we're saving a log file, the raw
+    solver output (B&B progress, MIP gap updates, ...) is redundant on the
+    terminal and can't be reliably prefixed with an instance/model tag line
+    by line -- especially once multiple solves run concurrently on
+    different threads/processes and their console output interleaves.
     Copies rather than mutates, since the same params dict is normally
     reused across all 4 solves and each needs its own LogFile."""
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     merged = dict(params) if params else {}
     merged["LogFile"] = log_path
+    merged["LogToConsole"] = 0
     return merged
 
 
@@ -1078,7 +1101,8 @@ def save_solve_log(exp_dir, results, solve_times, label=""):
         writer.writeheader()
         writer.writerows(rows)
 
-    print(f"Solve log saved to {log_dir}/ and {summary_path}")
+    tag = f"[{label}] " if label else ""
+    print(f"{tag}Solve log saved to {log_dir}/ and {summary_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1502,17 +1526,28 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     print(f"Scenario tree: {len(seasons)} stages x {weeks_per_season} weeks, "
           f"branching {branching} -> {n_leaves} full-horizon paths ({total_weeks} weeks total)")
 
-    print("\n--- Solving multistage scenario-tree model ---")
-    t0 = time.time()
+    # Tree is often the single slowest solve, so it's built now and solved in
+    # a background thread, overlapping with the static/MNP/MRP chain below.
+    # tree_model is a fully separate Gurobi Model/Env from `m` (the two-stage
+    # model) -- no shared mutable state to race on -- and Gurobi releases the
+    # GIL during optimize(), so this is genuine parallelism, not just
+    # concurrency.
+    print("\n--- Solving multistage scenario-tree model (in background) and "
+          "Static / MNP / MRP concurrently ---")
     tree_model = build_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
-    tree_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "tree.log"))
-                   if make_plots else solver_params)
-    tree_model.solve(params=tree_params)
-    t_tree = time.time() - t0
-    if make_plots:
-        save_all_variables(tree_model, os.path.join(plot_dir, "variables", "tree.pkl"))
 
-    print("\n--- Solving Static / MNP / MRP on the same scenario paths ---")
+    def _solve_tree_model():
+        t0 = time.time()
+        tree_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "tree.log"))
+                       if make_plots else solver_params)
+        tree_model.solve(params=tree_params)
+        if make_plots:
+            save_all_variables(tree_model, os.path.join(plot_dir, "variables", "tree.pkl"))
+        return time.time() - t0
+
+    tree_executor = ThreadPoolExecutor(max_workers=1)
+    tree_future = tree_executor.submit(_solve_tree_model)
+
     m, leaf_prob, total_weeks = build_two_stage_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
 
     print("Static...")
@@ -1568,6 +1603,11 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         save_all_variables(m, os.path.join(plot_dir, "variables", "mrp.pkl"))
     # m is now left in its MRP-solved state — the rebalancing plots rely on
     # being able to query it live, right after this call.
+
+    # Join the background tree solve (usually already done by now, since it
+    # started before static/MNP/MRP and often takes comparably long).
+    t_tree = tree_future.result()
+    tree_executor.shutdown()
 
     results = {
         "tree": _tree_result(tree_model, N, K, total_weeks),
