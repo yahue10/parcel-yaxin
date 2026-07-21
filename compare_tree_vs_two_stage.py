@@ -47,7 +47,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from ScenarioTreeModel import ScenarioTreeVehicleAllocationModel, build_toy_scenario_tree
+from ScenarioTreeModel import ScenarioTreeVehicleAllocationModel, build_toy_scenario_tree, ScenarioTree
 from Model import VehicleAllocationModel
 
 
@@ -187,6 +187,56 @@ def build_tree_model(N, K, tree, seed=42, cost_overrides=None):
     return m
 
 
+def build_flat_tree(tree, N):
+    """Re-express an existing multistage tree's O scenarios as O
+    independent, non-branching chains through the SAME season structure
+    (tree.e unchanged) -- i.e. the identical scenario set static/MNP/MRP
+    already solve on, just re-packaged so build_model(s_first_stage=True)
+    naturally recovers MRP: s[i,k,b] ends up shared across every chain at
+    season b (first-stage), while x/s_tilde/y stay fully independent per
+    chain (second-stage, no anticipativity restriction beyond the root).
+
+    NOT a depth-1 collapse (one leaf per scenario spanning the whole
+    horizon as a single "season") -- that would force MRP's s[i,k,b] down
+    to one shared value for the entire horizon instead of B independently
+    -chosen seasonal values, a strictly more restrictive formulation than
+    real MRP, not an equivalent one.
+    """
+    d_real, leaf_prob, total_weeks = build_full_horizon_scenarios(tree, N)
+    B = sorted(tree.e)
+    flat = ScenarioTree(dict(tree.e))
+    flat.add_root()
+    for o in sorted(leaf_prob):
+        parent_id = "root"
+        week_offset = 0
+        for b in B:
+            L = tree.e[b]
+            demand = {(i, t_local): d_real[i, week_offset + t_local - 1, o]
+                      for i in N for t_local in range(1, L + 1)}
+            node_id = f"{o}_{b}"
+            flat.add_child(node_id, parent_id, stage=b, prob=leaf_prob[o], demand=demand)
+            parent_id = node_id
+            week_offset += L
+    flat.validate(N)
+    return flat
+
+
+def build_mrp_tree_model(N, K, tree, seed=42, cost_overrides=None):
+    """MRP re-expressed as a scenario tree (see build_flat_tree): same
+    demand/leaf-probabilities and costs as the flat two-stage MRP, but
+    built through the SAME constraint-generating code as the multistage
+    tree model (ScenarioTreeVehicleAllocationModel.build_model with
+    s_first_stage=True) instead of Model.py's separately-coded
+    build_model_MRP. Kept alongside, not replacing, the original MRP -- for
+    cross-validation. Solve with m.solve(params=..., s_first_stage=True)."""
+    flat_tree = build_flat_tree(tree, N)
+    m = ScenarioTreeVehicleAllocationModel(N, K, flat_tree, seed=seed)
+    params = build_cost_params(N, K, cost_overrides)
+    _apply_cost_params(m, params)
+    m.K_green = [k for k in m.K if params["g"].get(k, 0) == 1]
+    return m
+
+
 def build_two_stage_model(N, K, tree, seed=42, cost_overrides=None):
     d_real, leaf_prob, total_weeks = build_full_horizon_scenarios(tree, N)
     d_pred = build_d_pred(d_real, leaf_prob, N, total_weeks)
@@ -288,20 +338,26 @@ def tree_cost_breakdown(m):
     nodes_ge1 = tree.nodes_with_stage_ge1()
     purchase = sum(m.beta[k] * m._get_val(f"Delta[{i},{k}]") for i in m.N for k in m.K)
 
+    # MRP_tree (m.s_first_stage=True) has no staged-revelation story to tell
+    # -- it's a two-stage model re-expressed through the tree's constraint
+    # -generating code, not a genuine multistage plan. So every transfer,
+    # including a season's last week (which would be "redeployment" for the
+    # real multistage tree), is reported as "rebalancing", matching flat
+    # MRP's own convention (mrp_cost_breakdown always reports redeployment=0).
     planned_sub = corrective_sub = rebalancing = redeployment = 0.0
     for n in nodes_ge1:
         node = tree.nodes[n]
         prob = node.prob
         L = tree.block_length(n)
         weeks = range(1, L + 1)
-        weeks_within = range(1, L)  # excludes the last week (that's redeployment)
-        planned_sub += prob * len(weeks) * sum(m.gamma[k] * m._get_val(f"s[{n},{i},{k}]")
+        weeks_within = weeks if m.s_first_stage else range(1, L)  # excludes the last week (that's redeployment)
+        planned_sub += prob * len(weeks) * sum(m.gamma[k] * m._s_val(n, i, k)
                                                 for i in m.N for k in m.K)
         corrective_sub += prob * sum(m.gamma_corr[k] * m._get_val(f"stilde[{n},{i},{k},{t}]")
                                       for i in m.N for k in m.K for t in weeks)
         rebalancing += prob * sum(m.alpha[i, j, k] * m._get_val(f"y[{n},{i},{j},{k},{t}]")
                                    for (i, j) in m.A for k in m.K for t in weeks_within)
-        if node.children:  # leaves have nothing to redeploy into
+        if node.children and not m.s_first_stage:  # leaves have nothing to redeploy into
             redeployment += prob * sum(m.alpha[i, j, k] * m._get_val(f"y[{n},{i},{j},{k},{L}]")
                                         for (i, j) in m.A for k in m.K)
     return {"purchase": purchase, "planned_subcontracting": planned_sub,
@@ -379,8 +435,8 @@ def tree_scenario_cost_breakdown(m):
                 continue
             L = tree.block_length(n)
             weeks = range(1, L + 1)
-            weeks_within = range(1, L)  # excludes the last week (that's redeployment)
-            planned_sub += len(weeks) * sum(m.gamma[k] * m._get_val(f"s[{n},{i},{k}]")
+            weeks_within = weeks if m.s_first_stage else range(1, L)  # excludes the last week (that's redeployment)
+            planned_sub += len(weeks) * sum(m.gamma[k] * m._s_val(n, i, k)
                                              for i in m.N for k in m.K)
             corrective_sub += sum(m.gamma_corr[k] * m._get_val(f"stilde[{n},{i},{k},{t}]")
                                    for i in m.N for k in m.K for t in weeks)
@@ -389,8 +445,9 @@ def tree_scenario_cost_breakdown(m):
             # Redeployment INTO n: the parent's last-week transfer (previous
             # node in the ancestry), attributed to n (the receiving stage).
             # Stage-1 nodes' parent is the root, which has no y variables.
+            # Skipped entirely for MRP_tree -- see tree_cost_breakdown's note.
             parent_id = ancestry[idx - 1]
-            if tree.nodes[parent_id].stage >= 1:
+            if tree.nodes[parent_id].stage >= 1 and not m.s_first_stage:
                 parent_L = tree.block_length(parent_id)
                 redeployment += sum(
                     m.alpha[i, j, k] * m._get_val(f"y[{parent_id},{i},{j},{k},{parent_L}]")
@@ -454,7 +511,7 @@ def tree_scenario_subcontracting_quantities(m):
                 continue
             L = tree.block_length(n)
             weeks = range(1, L + 1)
-            planned += L * sum(m._get_val(f"s[{n},{i},{k}]") for i in m.N for k in m.K)
+            planned += L * sum(m._s_val(n, i, k) for i in m.N for k in m.K)
             corrective += sum(m._get_val(f"stilde[{n},{i},{k},{t}]")
                                for i in m.N for k in m.K for t in weeks)
         result[o] = {"planned": planned, "corrective": corrective}
@@ -508,7 +565,7 @@ def tree_scenario_quantities_by_type(m):
                 continue
             L = tree.block_length(n)
             for k in m.K:
-                planned[k] += L * sum(m._get_val(f"s[{n},{i},{k}]") for i in m.N)
+                planned[k] += L * sum(m._s_val(n, i, k) for i in m.N)
                 corrective[k] += sum(m._get_val(f"stilde[{n},{i},{k},{t}]")
                                       for i in m.N for t in range(1, L + 1))
         for k in m.K:
@@ -587,7 +644,7 @@ def tree_scenario_subcontracting_by_period(m):
                 continue
             L = tree.block_length(n)
             for k in m.K:
-                planned = sum(m._get_val(f"s[{n},{i},{k}]") for i in m.N)
+                planned = sum(m._s_val(n, i, k) for i in m.N)
                 for t_local in range(1, L + 1):
                     global_week = week_offset + t_local - 1
                     corrective = sum(m._get_val(f"stilde[{n},{i},{k},{t_local}]") for i in m.N)
@@ -706,7 +763,9 @@ def save_subcontracting_extremes_table(results, K, output_path, label=""):
 def tree_scenario_rebalancing_quantities(m):
     """{o: {"rebalancing": qty, "redeployment": qty}}, mirroring the
     rebalancing/redeployment split in tree_scenario_cost_breakdown but
-    without the alpha price multiplier."""
+    without the alpha price multiplier. For MRP_tree (m.s_first_stage=True)
+    redeployment is always 0 and everything counts as rebalancing -- see
+    tree_cost_breakdown's note."""
     tree = m.tree
     result = {}
     for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
@@ -716,11 +775,11 @@ def tree_scenario_rebalancing_quantities(m):
             if node.stage == 0:
                 continue
             L = tree.block_length(n)
-            weeks_within = range(1, L)  # excludes the last week (that's redeployment)
+            weeks_within = range(1, L + 1) if m.s_first_stage else range(1, L)
             rebalancing += sum(m._get_val(f"y[{n},{i},{j},{k},{t}]")
                                 for (i, j) in m.A for k in m.K for t in weeks_within)
             parent_id = ancestry[idx - 1]
-            if tree.nodes[parent_id].stage >= 1:
+            if tree.nodes[parent_id].stage >= 1 and not m.s_first_stage:
                 parent_L = tree.block_length(parent_id)
                 redeployment += sum(
                     m._get_val(f"y[{parent_id},{i},{j},{k},{parent_L}]")
@@ -1135,11 +1194,11 @@ def tree_green_coverage_ratios(m):
                 for i in m.N:
                     coverage = 0.0
                     for k in m.K_green:
-                        cov_k = (m._get_val(f"x[{n},{i},{k},{t_local}]") + m._get_val(f"s[{n},{i},{k}]")
+                        cov_k = (m._get_val(f"x[{n},{i},{k},{t_local}]") + m._s_val(n, i, k)
                                  + m._get_val(f"stilde[{n},{i},{k},{t_local}]"))
                         coverage += m.q[k] * cov_k
                     demand = node.demand[i, t_local]
-                    required = m.theta[i] * demand
+                    required = round(m.theta[i] * demand)
                     ratio = coverage / required if required > 0 else float("nan")
                     result[i, global_week, o] = {"coverage": coverage, "required": required,
                                                   "ratio": ratio, "margin": coverage - required}
@@ -1159,7 +1218,7 @@ def static_green_coverage_ratios(m):
         for t in m.T:
             for o in m.O:
                 demand = m.d_real[i, t, o]
-                required = m.theta[i] * demand
+                required = round(m.theta[i] * demand)
                 cov = coverage[i]
                 ratio = cov / required if required > 0 else float("nan")
                 result[i, t, o] = {"coverage": cov, "required": required,
@@ -1182,7 +1241,7 @@ def mnp_green_coverage_ratios(m):
                     for k in m.K
                 )
                 demand = m.d_real[i, t, o]
-                required = m.theta[i] * demand
+                required = round(m.theta[i] * demand)
                 ratio = coverage / required if required > 0 else float("nan")
                 result[i, t, o] = {"coverage": coverage, "required": required,
                                     "ratio": ratio, "margin": coverage - required}
@@ -1207,7 +1266,7 @@ def mrp_green_coverage_ratios(m):
                     for k in m.K
                 )
                 demand = m.d_real[i, t, o]
-                required = m.theta[i] * demand
+                required = round(m.theta[i] * demand)
                 ratio = coverage / required if required > 0 else float("nan")
                 result[i, t, o] = {"coverage": coverage, "required": required,
                                     "ratio": ratio, "margin": coverage - required}
@@ -1243,7 +1302,7 @@ def tree_scenario_demand_coverage(m):
                     for k in m.K:
                         purchased += m.q[k] * m._get_val(f"x[{n},{i},{k},{t_local}]")
                         corrective += m.q[k] * m._get_val(f"stilde[{n},{i},{k},{t_local}]")
-            planned += L * sum(m.q[k] * m._get_val(f"s[{n},{i},{k}]") for i in m.N for k in m.K)
+            planned += L * sum(m.q[k] * m._s_val(n, i, k) for i in m.N for k in m.K)
         result[o] = {"demand": demand, "purchased": purchased, "planned": planned, "corrective": corrective}
     return result
 
@@ -1489,7 +1548,7 @@ def report_green_constraint(results, tol=1e-6):
 def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
             hub_correlation=None, season_drift=None, sibling_drift_correlation=None,
-            noise_frac=None, make_plots=False, plot_dir="compare_plots"):
+            noise_frac=None, make_plots=False, plot_dir="compare_plots", mrp_variant="flat"):
     """
     seed : int or None. An int (the default, 42) reproduces the exact same
         instance every call — same demand tree, same everything. Pass
@@ -1501,7 +1560,22 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         through to build_toy_scenario_tree — see its docstring in
         ScenarioTreeModel.py. Each defaults to None here, which leaves that
         function's own default in place.
+
+    mrp_variant : "flat" (default) solves MRP the original way, via
+        Model.py's build_model_MRP on the shared two-stage VehicleAllocationModel
+        `m`. "tree" instead solves it via build_mrp_tree_model -- the same
+        two-stage problem re-expressed through the tree's constraint
+        -generating code (build_model(s_first_stage=True)) -- for
+        cross-validation against the flat formulation. Both report/plot/save
+        results the same way (the "mrp" slot in `results`, MODEL_ORDER, every
+        CSV), EXCEPT: with mrp_variant="tree", the 3 plots that query
+        mrp_model's variables live (rebalancing-over-time, rebalancing
+        -heatmap, resource-decomposition) are skipped, since they're
+        hardcoded for the flat model's y[i,j,k,t,o]-style variable names --
+        see plot_all_comparisons' skip_mrp_live_plots.
     """
+    if mrp_variant not in ("flat", "tree"):
+        raise ValueError(f"mrp_variant must be 'flat' or 'tree', got {mrp_variant!r}")
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
         print(f"No seed given — using randomly generated seed={seed} "
@@ -1584,25 +1658,35 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "mnp.pkl"))
 
-    print("MRP...")
+    print(f"MRP ({mrp_variant})...")
     t0 = time.time()
     mrp_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "mrp.log"))
                   if make_plots else solver_params)
-    m.solve_MRP(params=mrp_params)
-    t_mrp = time.time() - t0
-    mrp_result = _extract_two_stage_result(
-        m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
-        mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
-        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage,
-        lambda mm: mrp_scenario_subcontracting_by_period(mm, total_weeks),
-        mrp_scenario_rebalancing_quantities,
-        mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
-        mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
-    )
-    if make_plots:
-        save_all_variables(m, os.path.join(plot_dir, "variables", "mrp.pkl"))
-    # m is now left in its MRP-solved state — the rebalancing plots rely on
-    # being able to query it live, right after this call.
+    if mrp_variant == "tree":
+        mrp_tree_model = build_mrp_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
+        mrp_tree_model.solve(params=mrp_params, s_first_stage=True)
+        t_mrp = time.time() - t0
+        mrp_result = _tree_result(mrp_tree_model, N, K, total_weeks)
+        if make_plots:
+            save_all_variables(mrp_tree_model, os.path.join(plot_dir, "variables", "mrp.pkl"))
+        mrp_model_for_plots = mrp_tree_model
+    else:
+        m.solve_MRP(params=mrp_params)
+        t_mrp = time.time() - t0
+        mrp_result = _extract_two_stage_result(
+            m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
+            mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
+            mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage,
+            lambda mm: mrp_scenario_subcontracting_by_period(mm, total_weeks),
+            mrp_scenario_rebalancing_quantities,
+            mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
+            mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
+        )
+        if make_plots:
+            save_all_variables(m, os.path.join(plot_dir, "variables", "mrp.pkl"))
+        # m is now left in its MRP-solved state — the rebalancing plots rely on
+        # being able to query it live, right after this call.
+        mrp_model_for_plots = m
 
     # Join the background tree solve (usually already done by now, since it
     # started before static/MNP/MRP and often takes comparably long).
@@ -1625,7 +1709,8 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         import matplotlib
         matplotlib.use("Agg")
         from plots_tree_vs_two_stage import plot_all_comparisons
-        plot_all_comparisons(tree_model, m, results, N, K, total_weeks, output_dir=plot_dir)
+        plot_all_comparisons(tree_model, mrp_model_for_plots, results, N, K, total_weeks, output_dir=plot_dir,
+                              skip_mrp_live_plots=(mrp_variant == "tree"))
 
         d_real, _, _ = build_full_horizon_scenarios(tree, N)
         save_flat_scenarios(d_real, leaf_prob, N, total_weeks,
@@ -1670,4 +1755,4 @@ if __name__ == "__main__":
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
             make_plots=True, plot_dir="compare_plots", seed=seed, season_drift=season_drift,
             sibling_drift_correlation=sibling_drift_correlation,
-            noise_frac=noise_frac)
+            noise_frac=noise_frac, mrp_variant="tree")

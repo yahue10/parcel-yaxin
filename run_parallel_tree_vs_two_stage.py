@@ -75,6 +75,13 @@ MAX_WORKERS = 6
 # much siblings' season-drift shocks move together (0=independent,
 # 1=lock-step). Optional "noise_frac" key: within-season weekly noise scale.
 # Both omit to that function's own defaults — see its docstring.
+# Optional "mrp_variant" key: "flat" (default) solves MRP the original way
+# (Model.py's build_model_MRP); "tree" instead solves it via
+# compare_tree_vs_two_stage.build_mrp_tree_model -- the same two-stage
+# problem re-expressed through the tree's constraint-generating code, for
+# cross-validation. Both produce the same results shape everywhere EXCEPT:
+# with "tree", the rebalancing-over-time/heatmap and resource-decomposition
+# plots are skipped (they're hardcoded for the flat model's variable names).
 INSTANCES = [
     {"label": "hub4_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
      "branching": 2, "n_hubs": 4, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
@@ -128,7 +135,7 @@ def solve_instance(instance_cfg):
 
     from ScenarioTreeModel import build_toy_scenario_tree
     from compare_tree_vs_two_stage import (
-        build_tree_model, build_two_stage_model, build_full_horizon_scenarios,
+        build_tree_model, build_two_stage_model, build_mrp_tree_model, build_full_horizon_scenarios,
         save_flat_scenarios, save_scenario_quantities_by_type, save_all_variables,
         static_cost_breakdown, mnp_cost_breakdown, mrp_cost_breakdown,
         static_scenario_cost_breakdown, mnp_scenario_cost_breakdown, mrp_scenario_cost_breakdown,
@@ -165,11 +172,14 @@ def solve_instance(instance_cfg):
     season_drift = instance_cfg.get("season_drift")
     sibling_drift_correlation = instance_cfg.get("sibling_drift_correlation")
     noise_frac = instance_cfg.get("noise_frac")
+    mrp_variant = instance_cfg.get("mrp_variant", "flat")
+    if mrp_variant not in ("flat", "tree"):
+        raise ValueError(f"[{label}] mrp_variant must be 'flat' or 'tree', got {mrp_variant!r}")
     N = list(range(instance_cfg["n_hubs"]))
     K = list(range(instance_cfg["n_types"]))
 
     print(f"[{label}] Starting: seasons={seasons}, weeks/season={weeks_per_season}, "
-          f"branching={branching}, hubs={len(N)}, types={len(K)}, seed={seed}")
+          f"branching={branching}, hubs={len(N)}, types={len(K)}, seed={seed}, mrp_variant={mrp_variant}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = os.path.join("experiments_tree_vs_two_stage", f"{label}_{timestamp}")
@@ -258,21 +268,29 @@ def solve_instance(instance_cfg):
 
     t0 = time.time()
     mrp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mrp.log"))
-    m.solve_MRP(params=mrp_params, options=GUROBI_OPTIONS, label=f"{label}:mrp")
-    mrp_result = _extract_two_stage_result(
-        m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
-        mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
-        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage,
-        lambda mm: mrp_scenario_subcontracting_by_period(mm, total_weeks),
-        mrp_scenario_rebalancing_quantities,
-        mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
-        mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
-    )
-    save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"), label=label)
+    if mrp_variant == "tree":
+        mrp_tree_model = build_mrp_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
+        mrp_tree_model.solve(params=mrp_params, options=GUROBI_OPTIONS, label=f"{label}:mrp", s_first_stage=True)
+        mrp_result = _tree_result(mrp_tree_model, N, K, total_weeks)
+        save_all_variables(mrp_tree_model, os.path.join(exp_dir, "variables", "mrp.pkl"), label=label)
+        mrp_model_for_plots = mrp_tree_model
+    else:
+        m.solve_MRP(params=mrp_params, options=GUROBI_OPTIONS, label=f"{label}:mrp")
+        mrp_result = _extract_two_stage_result(
+            m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
+            mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
+            mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage,
+            lambda mm: mrp_scenario_subcontracting_by_period(mm, total_weeks),
+            mrp_scenario_rebalancing_quantities,
+            mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
+            mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
+        )
+        save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"), label=label)
+        # m is now left in its MRP-solved state — plot_all_comparisons' rebalancing
+        # plots rely on being able to query it live, right after this call.
+        mrp_model_for_plots = m
     t_mrp = time.time() - t0
     print(f"[{label}] MRP done in {t_mrp:.1f}s obj={mrp_result['obj']}")
-    # m is now left in its MRP-solved state — plot_all_comparisons' rebalancing
-    # plots rely on being able to query it live, right after this call.
 
     # Join the background tree solve (usually already done by now, since it
     # started before static/MNP/MRP and often takes comparably long).
@@ -308,7 +326,8 @@ def solve_instance(instance_cfg):
           f"(tree={t_tree:.1f}s, static={t_static:.1f}s, mnp={t_mnp:.1f}s, mrp={t_mrp:.1f}s)")
 
     if all(results[k]["obj"] is not None for k in ("tree", "static", "mnp", "mrp")):
-        plot_all_comparisons(tree_model, m, results, N, K, total_weeks, output_dir=exp_dir, instance_label=label)
+        plot_all_comparisons(tree_model, mrp_model_for_plots, results, N, K, total_weeks, output_dir=exp_dir,
+                              instance_label=label, skip_mrp_live_plots=(mrp_variant == "tree"))
 
     d_real, _, _ = build_full_horizon_scenarios(tree, N)
     save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"), label=label)

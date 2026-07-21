@@ -366,7 +366,7 @@ class VehicleAllocationModel:
                     self.model.addConstr(
                         quicksum(self.g[k] * self.q[k] * (
                             x[i, k, t, o] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
-                         >= self.theta[i] * self.d_real[i, t, o],
+                         >= round(self.theta[i] * self.d_real[i, t, o]),
                         name=f"green_real_{i}_{k}_{t}_{o}"
                     )
 
@@ -417,7 +417,8 @@ class VehicleAllocationModel:
                 name=f"peak_demand_{i}"
             )
             self.model.addConstr(
-                quicksum(self.g[k] * self.q[k] * (x[i, k]+s[i, k]) for k in self.Ki[i]) >= self.theta[i] * d_max[i],
+                quicksum(self.g[k] * self.q[k] * (x[i, k]+s[i, k]) for k in self.Ki[i])
+                >= round(self.theta[i] * d_max[i]),
                 name=f"green_peak_{i}"
             )
 
@@ -483,7 +484,7 @@ class VehicleAllocationModel:
                     self.model.addConstr(
                         quicksum(self.g[k] * self.q[k] * (
                             x[i, k] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
-                         >= self.theta[i] * self.d_real[i, t, o],
+                         >= round(self.theta[i] * self.d_real[i, t, o]),
                         name=f"green_real_{i}_{k}_{t}_{o}"
                     )
 

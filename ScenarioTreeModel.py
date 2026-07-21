@@ -243,6 +243,7 @@ class ScenarioTreeVehicleAllocationModel:
         random.seed(self.seed)
         self.model = None
         self.vars = {}
+        self.s_first_stage = False
 
     def generate_costs(self):
         """Cost parameters — same scale/shape as Model.py's generate_data()."""
@@ -258,17 +259,31 @@ class ScenarioTreeVehicleAllocationModel:
         g = {0: 1, 1: 1, 2: 0}                                  # 1 = green vehicle type
         self.K_green = [k for k in self.K if g.get(k, 0) == 1]
 
-    def build_model(self, env=None):
+    def build_model(self, env=None, s_first_stage=False):
+        """
+        s_first_stage : if True, planned subcontracting s is committed once
+            per SEASON, before anything is known (indexed by (hub, type,
+            season) only, shared by every node at that season) instead of
+            today's default: freshly re-decided at every node (adapting to
+            everything observed so far). This is what turns the tree model
+            into the depth-B analogue of two-stage MRP -- see
+            compare_tree_vs_two_stage.build_mrp_tree_model.
+        """
         name = "ScenarioTreeVehicleAllocation"
         self.model = Model(env=env, name=name) if env is not None else Model(name=name)
         m = self.model
         tree = self.tree
+        self.s_first_stage = s_first_stage
         nodes_ge1 = tree.nodes_with_stage_ge1()
         weeks = {n: list(range(1, tree.block_length(n) + 1)) for n in nodes_ge1}
 
         # --- VARIABLES ---
         delta_idx = [(i, k) for i in self.N for k in self.K]
-        s_idx = [(n, i, k) for n in nodes_ge1 for i in self.N for k in self.K]
+        if s_first_stage:
+            B = sorted({tree.nodes[n].stage for n in nodes_ge1})
+            s_idx = [(i, k, b) for i in self.N for k in self.K for b in B]
+        else:
+            s_idx = [(n, i, k) for n in nodes_ge1 for i in self.N for k in self.K]
         x_idx = [(n, i, k, t) for n in nodes_ge1 for i in self.N for k in self.K for t in weeks[n]]
         stilde_idx = x_idx
         y_idx = [(n, i, j, k, t) for n in nodes_ge1 for (i, j) in self.A
@@ -283,14 +298,29 @@ class ScenarioTreeVehicleAllocationModel:
 
         self.vars = dict(Delta=Delta, s=s, x=x, s_tilde=s_tilde, y=y)
 
+        def s_of(n, i, k):
+            return s[i, k, tree.nodes[n].stage] if s_first_stage else s[n, i, k]
+
         # --- OBJECTIVE ---
         purchase_cost = sum(self.beta[k] * Delta[i, k] for i in self.N for k in self.K)
 
-        recourse_cost = sum(
+        if s_first_stage:
+            # First-stage cost: paid once, unconditionally -- not weighted by
+            # node.prob (that would double-count it across every scenario
+            # sharing a season, since s is now the SAME variable for all of them).
+            s_cost = sum(self.gamma[k] * s[i, k, b] * tree.e[b]
+                         for i in self.N for k in self.K for b in B)
+        else:
+            s_cost = sum(
+                tree.nodes[n].prob * len(weeks[n]) * sum(self.gamma[k] * s[n, i, k]
+                                                          for i in self.N for k in self.K)
+                for n in nodes_ge1
+            )
+
+        recourse_cost = s_cost + sum(
             tree.nodes[n].prob * (
-                len(weeks[n]) * sum(self.gamma[k] * s[n, i, k] for i in self.N for k in self.K)
-                + sum(self.gamma_corr[k] * s_tilde[n, i, k, t]
-                      for i in self.N for k in self.K for t in weeks[n])
+                sum(self.gamma_corr[k] * s_tilde[n, i, k, t]
+                    for i in self.N for k in self.K for t in weeks[n])
                 + sum(self.alpha[i, j, k] * y[n, i, j, k, t]
                       for (i, j) in self.A for k in self.K for t in weeks[n])
             )
@@ -335,7 +365,7 @@ class ScenarioTreeVehicleAllocationModel:
             for t in weeks[n]:
                 for i in self.N:
                     coverage = {
-                        k: x[n, i, k, t] + s[n, i, k] + s_tilde[n, i, k, t]
+                        k: x[n, i, k, t] + s_of(n, i, k) + s_tilde[n, i, k, t]
                         for k in self.Ki[i]
                     }
                     m.addConstr(
@@ -344,7 +374,7 @@ class ScenarioTreeVehicleAllocationModel:
                     )
                     green_k = [k for k in self.Ki[i] if k in self.K_green]
                     m.addConstr(
-                        sum(self.q[k] * coverage[k] for k in green_k) >= self.theta[i] * nd.demand[i, t],
+                        sum(self.q[k] * coverage[k] for k in green_k) >= round(self.theta[i] * nd.demand[i, t]),
                         name=f"green_{n}_{i}_{t}"
                     )
 
@@ -354,14 +384,15 @@ class ScenarioTreeVehicleAllocationModel:
 
         return m
 
-    def solve(self, params=None, options=None, label=""):
+    def solve(self, params=None, options=None, label="", s_first_stage=False):
         """
         label : optional prefix (e.g. an instance/model tag) put in front of
             this solve's outcome line, so concurrent solves' output stays
             distinguishable in the terminal.
+        s_first_stage : forwarded to build_model() -- see its docstring.
         """
         env = Env(params=options) if options is not None else Env()
-        self.build_model(env=env)
+        self.build_model(env=env, s_first_stage=s_first_stage)
 
         if params:
             for name, value in params.items():
@@ -387,6 +418,17 @@ class ScenarioTreeVehicleAllocationModel:
             return var.X
         except AttributeError:
             return 0.0
+
+    def _s_val(self, n, i, k):
+        """Looks up planned subcontracting s for node n, hub i, type k --
+        transparently handling both s_first_stage=True (s[i,k,b], shared by
+        every node at that season) and the default False (s[n,i,k], per
+        node). When False this is byte-for-byte the same lookup as calling
+        _get_val directly -- a pure no-op for every existing caller."""
+        if self.s_first_stage:
+            b = self.tree.nodes[n].stage
+            return self._get_val(f"s[{i},{k},{b}]")
+        return self._get_val(f"s[{n},{i},{k}]")
 
 
 if __name__ == "__main__":

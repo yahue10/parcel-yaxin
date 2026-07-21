@@ -726,7 +726,7 @@ def _tree_resource_decomposition(tree_model):
             L = tree.block_length(n)
             for i in tree_model.N:
                 for k in tree_model.K:
-                    planned = tree_model._get_val(f"s[{n},{i},{k}]")
+                    planned = tree_model._s_val(n, i, k)
                     for t_local in range(1, L + 1):
                         global_week = week_offset + t_local - 1
                         x_val = tree_model._get_val(f"x[{n},{i},{k},{t_local}]")
@@ -796,7 +796,7 @@ def _tree_residual_capacity(tree_model, N, K):
                     coverage = 0.0
                     for k in K:
                         cov_k = (tree_model._get_val(f"x[{n},{i},{k},{t_local}]")
-                                 + tree_model._get_val(f"s[{n},{i},{k}]")
+                                 + tree_model._s_val(n, i, k)
                                  + tree_model._get_val(f"stilde[{n},{i},{k},{t_local}]"))
                         coverage += tree_model.q[k] * cov_k
                     result[i, global_week, o] = coverage - node.demand[i, t_local]
@@ -940,7 +940,8 @@ def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_w
           f"{os.path.join(output_dir, 'resource_decomposition')}/ ({n_tree + n_mrp} figures)")
 
 
-def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, output_dir=".", instance_label=""):
+def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, output_dir=".", instance_label="",
+                          skip_mrp_live_plots=False):
     """Generate all comparison plots and a text cost summary in output_dir.
 
     `mrp_model` must be the shared VehicleAllocationModel instance right after
@@ -951,6 +952,14 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
         confirmation prints (and threaded through to the two sub-functions
         below that print their own), so concurrent runs' output stays
         distinguishable in the terminal.
+
+    skip_mrp_live_plots : set True when `mrp_model` is NOT a flat
+        VehicleAllocationModel with y[i,j,k,t,o]-style variable names -- e.g.
+        compare_tree_vs_two_stage.compare(mrp_variant="tree") passes a
+        ScenarioTreeVehicleAllocationModel instead, whose variables are named
+        y[n,i,j,k,t]. The 3 plots below query mrp_model's variables live (not
+        through `results`) and are hardcoded for the flat naming, so they're
+        skipped rather than silently producing wrong output.
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -961,14 +970,20 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
     plot_compare_subcontracting_quantities(results, output_dir=output_dir)
     plot_compare_green_ratio(results, output_dir=output_dir)
     plot_compare_demand_coverage(results, output_dir=output_dir)
-    plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
-    plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
+    if skip_mrp_live_plots:
+        tag = f"[{instance_label}] " if instance_label else ""
+        print(f"{tag}Skipping rebalancing-over-time/heatmap and resource-decomposition plots "
+              "-- mrp_model isn't a flat two-stage model (mrp_variant='tree').")
+    else:
+        plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
+        plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
 
     d_real, leaf_prob, _ = build_full_horizon_scenarios(tree_model.tree, N)
     plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=tree_model.tree, output_dir=output_dir,
                              instance_label=instance_label)
-    plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir,
-                                             instance_label=instance_label)
+    if not skip_mrp_live_plots:
+        plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir,
+                                                 instance_label=instance_label)
 
     tree_obj = results["tree"]["obj"]
 
