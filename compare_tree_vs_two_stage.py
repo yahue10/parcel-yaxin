@@ -49,7 +49,7 @@ import numpy as np
 
 from ScenarioTreeModel import ScenarioTreeVehicleAllocationModel, build_toy_scenario_tree, ScenarioTree
 from Model import VehicleAllocationModel
-from real_hub_data import build_real_data_scenario_tree
+from real_hub_data import build_real_data_scenario_tree, build_distance_based_alpha, save_hub_data_used
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +174,34 @@ def _apply_cost_params(m, params):
     m.S = params["S"]
     m.g = params["g"]
     return m
+
+
+def save_cost_params(params, output_dir):
+    """Writes the resolved cost params (exactly what build_cost_params
+    returned, including any cost_overrides -- e.g. real_hub_data's
+    distance-based alpha when demand_source="real") to two CSVs:
+      - cost_params.csv: the scalar-keyed params (q, beta, gamma,
+        gamma_corr, theta, S, g) -- columns parameter, key, value.
+      - cost_params_alpha.csv: alpha specifically (relational i,j,k) --
+        columns hub_from, hub_to, type, alpha_eur.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    scalar_path = os.path.join(output_dir, "cost_params.csv")
+    with open(scalar_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["parameter", "key", "value"])
+        for name in ("q", "beta", "gamma", "gamma_corr", "theta", "S", "g"):
+            for key, value in params[name].items():
+                writer.writerow([name, key, value])
+    print(f"Cost params saved to {scalar_path}")
+
+    alpha_path = os.path.join(output_dir, "cost_params_alpha.csv")
+    with open(alpha_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["hub_from", "hub_to", "type", "alpha_eur"])
+        for (i, j, k), value in params["alpha"].items():
+            writer.writerow([i, j, k, value])
+    print(f"Alpha (transfer cost) params saved to {alpha_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -1600,6 +1628,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     K = list(range(n_types))
     solver_params = solver_params or {"TimeLimit": 600, "MIPGap": 0.01, "OutputFlag": 1}
 
+    real_hub_data_used = None  # set below when demand_source="real"; used later for saving
     if demand_source == "real":
         if hub_correlation is not None or noise_frac is not None:
             print("Note: hub_correlation/noise_frac are ignored with demand_source='real' "
@@ -1609,9 +1638,17 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             real_kwargs["season_drift"] = season_drift
         if sibling_drift_correlation is not None:
             real_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
-        tree, hub_meta = build_real_data_scenario_tree(n_hubs, data_dir=data_dir, **real_kwargs)
+        tree, base_demand, corr_matrix, cv_by_hub, hub_meta = build_real_data_scenario_tree(
+            n_hubs, data_dir=data_dir, **real_kwargs)
+        real_hub_data_used = (base_demand, corr_matrix, cv_by_hub, hub_meta)
         hub_list = ", ".join(f"{i}={hub_meta[i]['site']}" for i in hub_meta)
         print(f"Using real hub data: {hub_list}")
+
+        distance_alpha = build_distance_based_alpha(hub_meta, N, K)
+        if cost_overrides and "alpha" in cost_overrides:
+            print("Note: cost_overrides['alpha'] is ignored with demand_source='real' "
+                  "-- using real distance-based transfer costs instead.")
+        cost_overrides = {**(cost_overrides or {}), "alpha": distance_alpha}
     else:
         tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
                             hub_correlation=hub_correlation, seed=seed)
@@ -1759,6 +1796,12 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             {mk: results[mk]["scenario_corrective_by_hub_season"] for mk in MODEL_ORDER}, N, B,
             os.path.join(plot_dir, "corrective_by_hub_season_scenario.csv"), value_label="corrective_qty")
         save_solve_log(plot_dir, results, solve_times)
+
+        final_cost_params = build_cost_params(N, K, cost_overrides)
+        save_cost_params(final_cost_params, plot_dir)
+        if real_hub_data_used is not None:
+            base_demand, corr_matrix, cv_by_hub, hub_meta = real_hub_data_used
+            save_hub_data_used(base_demand, corr_matrix, cv_by_hub, hub_meta, N, plot_dir)
 
     return tree_model, m, results
 

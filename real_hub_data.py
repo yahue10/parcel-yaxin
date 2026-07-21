@@ -22,7 +22,9 @@ impossible). np.linalg.cholesky() -- used directly by build_toy_scenario_tree
 clipping before use (see _nearest_psd_correlation).
 """
 
+import csv
 import os
+from math import asin, cos, radians, sin, sqrt
 
 import numpy as np
 import pandas as pd
@@ -32,6 +34,17 @@ from ScenarioTreeModel import build_toy_scenario_tree
 DEFAULT_DATA_DIR = "data"
 DEFAULT_INFO_CSV = "negative_pairs_overlap20_within80km_first20hubs.csv"
 DEFAULT_CORR_CSV = "negative_pairs_overlap20_within80km_first20hubs_corr_matrix.csv"
+
+# Distance-based rebalancing/transfer cost (alpha) -- see build_distance_based_alpha.
+# Bikes: flat EUR/km. Vans: (fuel/energy price per km + driver wage/speed) EUR/km,
+# one-way. Distance = haversine(hub_i, hub_j) * ROAD_DISTANCE_FACTOR (straight
+# -line routes are optimistic vs. real road travel).
+ROAD_DISTANCE_FACTOR = 1.3
+DRIVER_HOURLY_WAGE_EUR = 20.0
+AVERAGE_SPEED_KMH = 80.0
+FUEL_PRICE_PER_KM_EUR = {1: 0.05, 2: 0.16}   # e-van, d-van
+BIKE_RATE_PER_KM_EUR = 1.0
+BIKE_MAX_COST_EUR = 80.0  # cap: beyond this distance a bike transfer wouldn't actually be used
 
 
 def _nearest_psd_correlation(corr, epsilon=1e-6):
@@ -103,7 +116,10 @@ def build_real_data_scenario_tree(n_hubs, seasons=(1, 2, 3, 4), branching=2, wee
     sibling_drift_correlation, and tree structure are all UNCHANGED from
     the synthetic generator.
 
-    Returns (tree, hub_meta). N = list(range(n_hubs)) throughout, matching
+    Returns (tree, base_demand, corr_matrix, cv_by_hub, hub_meta) -- the
+    same four values load_hub_data returns, passed through so callers can
+    save exactly what was used (see save_hub_data_used) without a second,
+    possibly-inconsistent load. N = list(range(n_hubs)) throughout, matching
     every other builder in this codebase; hub_meta maps each integer label
     back to the real hub's site ID/name/location for reference/plotting.
     """
@@ -114,4 +130,59 @@ def build_real_data_scenario_tree(n_hubs, seasons=(1, 2, 3, 4), branching=2, wee
         base_demand=base_demand, hub_correlation=corr_matrix, noise_frac=cv_by_hub,
         season_drift=season_drift, sibling_drift_correlation=sibling_drift_correlation, seed=seed,
     )
-    return tree, hub_meta
+    return tree, base_demand, corr_matrix, cv_by_hub, hub_meta
+
+
+def _haversine_km(lat1, lng1, lat2, lng2):
+    """Great-circle distance between two lat/lng points, in km."""
+    R = 6371.0
+    p1, p2 = radians(lat1), radians(lat2)
+    dphi, dlambda = radians(lat2 - lat1), radians(lng2 - lng1)
+    a = sin(dphi / 2) ** 2 + cos(p1) * cos(p2) * sin(dlambda / 2) ** 2
+    return 2 * R * asin(sqrt(a))
+
+
+def build_distance_based_alpha(hub_meta, N, K):
+    """alpha[i,j,k] from real hub locations (see load_hub_data's hub_meta):
+    bikes (k=0) BIKE_RATE_PER_KM_EUR flat, capped at BIKE_MAX_COST_EUR; vans
+    (k=1,2) (fuel/energy price + driver wage/speed) EUR/km, one-way, uncapped.
+    Distance = haversine * ROAD_DISTANCE_FACTOR. Covers the full N x N x K
+    grid (including i==j, distance 0 -> alpha 0), matching build_cost_params'
+    existing alpha shape."""
+    driver_cost_per_km = DRIVER_HOURLY_WAGE_EUR / AVERAGE_SPEED_KMH
+    alpha = {}
+    for i in N:
+        for j in N:
+            d = _haversine_km(hub_meta[i]["lat"], hub_meta[i]["lng"],
+                               hub_meta[j]["lat"], hub_meta[j]["lng"]) * ROAD_DISTANCE_FACTOR
+            alpha[i, j, 0] = min(BIKE_RATE_PER_KM_EUR * d, BIKE_MAX_COST_EUR)
+            for k in (1, 2):
+                alpha[i, j, k] = (FUEL_PRICE_PER_KM_EUR[k] + driver_cost_per_km) * d
+    return alpha
+
+
+def save_hub_data_used(base_demand, corr_matrix, cv_by_hub, hub_meta, N, output_dir):
+    """Writes the real hub data actually used for this run:
+      - hub_data_used.csv: one row per selected hub (label, real ID/name,
+        location, mean/std weekly demand, n_weeks_observed).
+      - hub_correlation_used.csv: the N x N correlation matrix actually
+        used (post-repair, sliced to the selected hubs), hub labels as
+        row/column headers.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    hub_path = os.path.join(output_dir, "hub_data_used.csv")
+    with open(hub_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["hub_label", "regate", "site", "lat", "lng",
+                          "mean_weekly_demand", "std_weekly_demand", "n_weeks_observed"])
+        for i in N:
+            mean = base_demand[i]
+            writer.writerow([i, hub_meta[i]["regate"], hub_meta[i]["site"],
+                              hub_meta[i]["lat"], hub_meta[i]["lng"],
+                              mean, cv_by_hub[i] * mean, hub_meta[i]["n_weeks_observed"]])
+    print(f"Real hub data used saved to {hub_path}")
+
+    corr_path = os.path.join(output_dir, "hub_correlation_used.csv")
+    corr_df = pd.DataFrame(corr_matrix, index=list(N), columns=list(N))
+    corr_df.to_csv(corr_path)
+    print(f"Hub correlation matrix used saved to {corr_path}")

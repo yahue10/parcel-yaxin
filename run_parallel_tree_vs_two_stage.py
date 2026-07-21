@@ -108,7 +108,7 @@ INSTANCES = [
     # Same n_hubs=6 shape twice, differentiated by seed (different
     # season-drift/weekly-noise draws) instead of noise_frac/hub_correlation
     # -- those aren't independent knobs anymore under demand_source="real".
-    {"label": "hub16_real_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+    {"label": "hub16_real_seed43", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
      "branching": 4, "n_hubs": 16, "n_types": 3, "seed": 43,
      "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
      "demand_source": "real"},
@@ -131,9 +131,10 @@ def solve_instance(instance_cfg):
     matplotlib.use("Agg")
 
     from ScenarioTreeModel import build_toy_scenario_tree
-    from real_hub_data import build_real_data_scenario_tree
+    from real_hub_data import build_real_data_scenario_tree, build_distance_based_alpha, save_hub_data_used
     from compare_tree_vs_two_stage import (
         build_tree_model, build_two_stage_model, build_mrp_tree_model, build_full_horizon_scenarios,
+        build_cost_params, save_cost_params,
         save_flat_scenarios, save_scenario_quantities_by_type, save_all_variables,
         static_cost_breakdown, mnp_cost_breakdown, mrp_cost_breakdown,
         static_scenario_cost_breakdown, mnp_scenario_cost_breakdown, mrp_scenario_cost_breakdown,
@@ -197,6 +198,7 @@ def solve_instance(instance_cfg):
         json.dump(instance_cfg, f, indent=2, default=str)
 
     # --- Build the instance: the scenario tree, then the scenarios derived from it ---
+    real_hub_data_used = None  # set below when demand_source="real"; used later for saving
     if demand_source == "real":
         if hub_correlation is not None or noise_frac is not None:
             print(f"[{label}] Note: hub_correlation/noise_frac are ignored with "
@@ -206,9 +208,17 @@ def solve_instance(instance_cfg):
             real_kwargs["season_drift"] = season_drift
         if sibling_drift_correlation is not None:
             real_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
-        tree, hub_meta = build_real_data_scenario_tree(len(N), data_dir=data_dir, **real_kwargs)
+        tree, base_demand, corr_matrix, cv_by_hub, hub_meta = build_real_data_scenario_tree(
+            len(N), data_dir=data_dir, **real_kwargs)
+        real_hub_data_used = (base_demand, corr_matrix, cv_by_hub, hub_meta)
         hub_list = ", ".join(f"{i}={hub_meta[i]['site']}" for i in hub_meta)
         print(f"[{label}] Using real hub data: {hub_list}")
+
+        distance_alpha = build_distance_based_alpha(hub_meta, N, K)
+        if cost_overrides and "alpha" in cost_overrides:
+            print(f"[{label}] Note: cost_overrides['alpha'] is ignored with demand_source='real' "
+                  "-- using real distance-based transfer costs instead.")
+        cost_overrides = {**(cost_overrides or {}), "alpha": distance_alpha}
     else:
         tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
                             hub_correlation=hub_correlation, seed=seed)
@@ -364,6 +374,12 @@ def solve_instance(instance_cfg):
         {mk: results[mk]["scenario_corrective_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
         N, B, os.path.join(exp_dir, "corrective_by_hub_season_scenario.csv"), value_label="corrective_qty", label=label)
     save_solve_log(exp_dir, results, result["solve_times"], label=label)
+
+    final_cost_params = build_cost_params(N, K, cost_overrides)
+    save_cost_params(final_cost_params, exp_dir)
+    if real_hub_data_used is not None:
+        base_demand, corr_matrix, cv_by_hub, hub_meta = real_hub_data_used
+        save_hub_data_used(base_demand, corr_matrix, cv_by_hub, hub_meta, N, exp_dir)
 
     with open(os.path.join(exp_dir, "result.pkl"), "wb") as f:
         pickle.dump(result, f)
