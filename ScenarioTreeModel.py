@@ -335,9 +335,7 @@ class ScenarioTreeVehicleAllocationModel:
             for t in weeks[n]:
                 for i in self.N:
                     coverage = {
-                        k: x[n, i, k, t] + s[n, i, k]
-                           - (0 if nd.stage == 1 else s[parent, i, k])
-                           + s_tilde[n, i, k, t]
+                        k: x[n, i, k, t] + s[n, i, k] + s_tilde[n, i, k, t]
                         for k in self.Ki[i]
                     }
                     m.addConstr(

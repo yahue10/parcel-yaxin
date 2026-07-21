@@ -775,20 +775,19 @@ def _mrp_resource_decomposition(mrp_model, total_weeks):
 
 def _tree_residual_capacity(tree_model, N, K):
     """{(i, global_week, o): coverage - demand}, mirroring the tree's actual
-    demand constraint exactly (ALL vehicle types, including the s[parent]
-    netting on stage > 1 nodes — see tree_green_coverage_ratios in
-    compare_tree_vs_two_stage.py for the same formula scoped to green types
-    only). Always >= 0 for a feasible solve; how much spare capacity, in
-    q-weighted units, is left after covering that period's demand."""
+    demand constraint exactly (ALL vehicle types) -- see
+    tree_green_coverage_ratios in compare_tree_vs_two_stage.py for the same
+    formula scoped to green types only. Always >= 0 for a feasible solve;
+    how much spare capacity, in q-weighted units, is left after covering
+    that period's demand."""
     tree = tree_model.tree
     result = {}
     for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
         week_offset = 0
-        for idx, n in enumerate(ancestry):
+        for n in ancestry:
             node = tree.nodes[n]
             if node.stage == 0:
                 continue
-            parent_id = ancestry[idx - 1]
             L = tree.block_length(n)
             for t_local in range(1, L + 1):
                 global_week = week_offset + t_local - 1
@@ -796,10 +795,8 @@ def _tree_residual_capacity(tree_model, N, K):
                     coverage = 0.0
                     for k in K:
                         cov_k = (tree_model._get_val(f"x[{n},{i},{k},{t_local}]")
-                                 + tree_model._get_val(f"s[{n},{i},{k}]"))
-                        if node.stage > 1:
-                            cov_k -= tree_model._get_val(f"s[{parent_id},{i},{k}]")
-                        cov_k += tree_model._get_val(f"stilde[{n},{i},{k},{t_local}]")
+                                 + tree_model._get_val(f"s[{n},{i},{k}]")
+                                 + tree_model._get_val(f"stilde[{n},{i},{k},{t_local}]"))
                         coverage += tree_model.q[k] * cov_k
                     result[i, global_week, o] = coverage - node.demand[i, t_local]
             week_offset += L

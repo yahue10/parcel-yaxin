@@ -560,6 +560,419 @@ def save_scenario_quantities_by_type(results, K, output_path):
     print(f"Per-scenario, per-type quantities saved to {output_path}")
 
 
+# ---------------------------------------------------------------------------
+# Per-scenario subcontracting BY PERIOD (planned + corrective, per week),
+# used to find which week(s) had the heaviest subcontracting load.
+# ---------------------------------------------------------------------------
+#
+# Returns {(o, t, k): qty}, t 0-indexed over range(total_weeks). "qty" is
+# planned + corrective subcontracted units of type k active that week,
+# summed across hubs (planned is constant within a season/tree-block; only
+# corrective genuinely varies week to week).
+
+def tree_scenario_subcontracting_by_period(m):
+    tree = m.tree
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        week_offset = 0
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            L = tree.block_length(n)
+            for k in m.K:
+                planned = sum(m._get_val(f"s[{n},{i},{k}]") for i in m.N)
+                for t_local in range(1, L + 1):
+                    global_week = week_offset + t_local - 1
+                    corrective = sum(m._get_val(f"stilde[{n},{i},{k},{t_local}]") for i in m.N)
+                    result[o, global_week, k] = planned + corrective
+            week_offset += L
+    return result
+
+
+def static_scenario_subcontracting_by_period(m, total_weeks):
+    """Static's subcontracting has no time/scenario dependence -- the same
+    planned level is maintained every week, with no corrective term."""
+    planned = {k: sum(m._get_val(f"s[{i},{k}]") for i in m.N) for k in m.K}
+    return {(o, t, k): planned[k] for o in m.O for t in range(total_weeks) for k in m.K}
+
+
+def mnp_scenario_subcontracting_by_period(m, total_weeks):
+    _, season_of_week, _ = _season_weeks(m)
+    result = {}
+    for k in m.K:
+        planned_by_t = {t: sum(m._get_val(f"s[{i},{k},{season_of_week[t]}]") for i in m.N)
+                         for t in range(total_weeks)}
+        for o in m.O:
+            for t in range(total_weeks):
+                corrective = sum(m._get_val(f"s_corr[{i},{k},{t},{o}]") for i in m.N)
+                result[o, t, k] = planned_by_t[t] + corrective
+    return result
+
+
+def mrp_scenario_subcontracting_by_period(m, total_weeks):
+    """MRP's s/s_corr have the identical shape/index convention as MNP's --
+    only x (fleet position, not queried here) gains the extra rebalancing
+    lever -- so the same formula applies unchanged."""
+    return mnp_scenario_subcontracting_by_period(m, total_weeks)
+
+
+def subcontracting_period_extremes(by_period, K, total_weeks):
+    """Given {(o, t, k): qty} (see *_scenario_subcontracting_by_period above),
+    returns, per scenario o:
+      - total_by_type: {k: total qty of type k subcontracted across the
+        WHOLE horizon (cumulative, summed over every week)}
+      - total_all_types: total_by_type summed over k (cumulative, whole
+        horizon, every type)
+      - peak_week_total: the single highest WEEK's total qty (summed across
+        all types that week only -- NOT the same as total_all_types)
+      - max_period_overall: 1-indexed week(s) tied for peak_week_total (None
+        if every week has the same total -- nothing to single out)
+      - max_period_by_type: {k: 1-indexed week(s) tied for type k's own
+        highest single week (None if constant across every week)}
+    """
+    n_scenarios = len({o for o, t, k in by_period})
+    result = {}
+    for o in range(n_scenarios):
+        total_by_type = {k: sum(by_period[o, t, k] for t in range(total_weeks)) for k in K}
+        total_by_period = [sum(by_period[o, t, k] for k in K) for t in range(total_weeks)]
+        peak_week_total = max(total_by_period)
+        if peak_week_total == min(total_by_period):
+            max_period_overall = None
+        else:
+            max_period_overall = [t + 1 for t, v in enumerate(total_by_period) if v == peak_week_total]
+        max_period_by_type = {}
+        for k in K:
+            vals = [by_period[o, t, k] for t in range(total_weeks)]
+            mx = max(vals)
+            max_period_by_type[k] = None if mx == min(vals) else [t + 1 for t, v in enumerate(vals) if v == mx]
+        result[o] = {
+            "total_by_type": total_by_type,
+            "total_all_types": sum(total_by_type.values()),
+            "peak_week_total": peak_week_total,
+            "max_period_overall": max_period_overall,
+            "max_period_by_type": max_period_by_type,
+        }
+    return result
+
+
+def _fmt_periods(periods):
+    return "constant (n/a)" if periods is None else ";".join(str(p) for p in periods)
+
+
+def save_subcontracting_extremes_table(results, K, output_path):
+    """Per scenario, per model, per vehicle type: total subcontracted
+    (planned + corrective) vehicles across the whole horizon, the week(s)
+    with that type's own highest single-week subcontracted quantity, and
+    the week(s) with the highest single-week TOTAL subcontracted quantity
+    across all types. 'constant (n/a)' in a max-period column means the
+    quantity never changed across the horizon (e.g. Static, or a scenario
+    with zero subcontracting throughout). total_all_types/peak_week_total
+    are repeated on every type row of a given (model, scenario) for
+    convenience -- they don't vary by type."""
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "scenario", "type", "subcontracted_qty_type",
+                          "max_period_this_type", "subcontracted_qty_all_types_total",
+                          "peak_week_total_qty", "max_period_overall"])
+        for model_key in MODEL_ORDER:
+            extremes = results[model_key]["scenario_subcontracting_extremes"]
+            for o in sorted(extremes):
+                e = extremes[o]
+                for k in K:
+                    writer.writerow([
+                        MODEL_LABELS[model_key], o, k,
+                        e["total_by_type"][k], _fmt_periods(e["max_period_by_type"][k]),
+                        e["total_all_types"], e["peak_week_total"],
+                        _fmt_periods(e["max_period_overall"]),
+                    ])
+    print(f"Subcontracting period-extremes table saved to {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# Per-scenario rebalancing / redeployment MOVEMENT quantities (raw vehicle
+# units, not cost-weighted) -- outbound counts only: y[i,j,...] already
+# represents a move OUT of hub i, so summing over all (i, j, k, t) counts
+# each unit-move exactly once.
+# ---------------------------------------------------------------------------
+
+def tree_scenario_rebalancing_quantities(m):
+    """{o: {"rebalancing": qty, "redeployment": qty}}, mirroring the
+    rebalancing/redeployment split in tree_scenario_cost_breakdown but
+    without the alpha price multiplier."""
+    tree = m.tree
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        rebalancing = redeployment = 0.0
+        for idx, n in enumerate(ancestry):
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            L = tree.block_length(n)
+            weeks_within = range(1, L)  # excludes the last week (that's redeployment)
+            rebalancing += sum(m._get_val(f"y[{n},{i},{j},{k},{t}]")
+                                for (i, j) in m.A for k in m.K for t in weeks_within)
+            parent_id = ancestry[idx - 1]
+            if tree.nodes[parent_id].stage >= 1:
+                parent_L = tree.block_length(parent_id)
+                redeployment += sum(
+                    m._get_val(f"y[{parent_id},{i},{j},{k},{parent_L}]")
+                    for (i, j) in m.A for k in m.K
+                )
+        result[o] = {"rebalancing": rebalancing, "redeployment": redeployment}
+    return result
+
+
+def static_scenario_rebalancing_quantities(m):
+    """Static has no rebalancing lever at all."""
+    return {o: {"rebalancing": 0.0, "redeployment": 0.0} for o in m.O}
+
+
+def mnp_scenario_rebalancing_quantities(m):
+    """MNP has no rebalancing lever at all."""
+    return {o: {"rebalancing": 0.0, "redeployment": 0.0} for o in m.O}
+
+
+def mrp_scenario_rebalancing_quantities(m):
+    """MRP has no stage-boundary concept, so all movement is "rebalancing";
+    redeployment is always 0 (matching mrp_scenario_cost_breakdown)."""
+    result = {}
+    for o in m.O:
+        rebalancing = sum(m._get_val(f"y[{i},{j},{k},{t},{o}]")
+                           for i in m.N for j in m.N for k in m.K for t in m.T)
+        result[o] = {"rebalancing": rebalancing, "redeployment": 0.0}
+    return result
+
+
+def save_rebalancing_movement_table(results, output_path):
+    """Per scenario, per model: total outbound rebalancing and redeployment
+    vehicle-unit movements (raw counts, not cost-weighted). Static/MNP
+    always report 0 for both -- neither model has a rebalancing lever."""
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "scenario", "rebalancing_qty", "redeployment_qty", "total_movement_qty"])
+        for model_key in MODEL_ORDER:
+            qty = results[model_key]["scenario_rebalancing_quantities"]
+            for o in sorted(qty):
+                r, d = qty[o]["rebalancing"], qty[o]["redeployment"]
+                writer.writerow([MODEL_LABELS[model_key], o, r, d, r + d])
+    print(f"Rebalancing/redeployment movement table saved to {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# EXPECTED (probability-weighted) breakdowns BY HUB AND SEASON -- coarser
+# than the per-week/per-scenario tables above: one number per (hub, season),
+# averaged over every scenario, for two operationally-focused metrics:
+#   - outbound vehicles: total rebalancing + redeployment vehicle-units
+#     leaving hub i during season b (0 for Static/MNP -- neither has a
+#     rebalancing lever)
+#   - corrective subcontracting: total corrective vehicle-units used at hub
+#     i during season b (0 for Static -- no second-stage recourse at all)
+# Mirrors *_cost_breakdown()'s probability-weighting convention (node.prob
+# for tree, m.p_omega(o) for the two-stage models) rather than the realized/
+# per-scenario convention used by the *_scenario_* functions above.
+# ---------------------------------------------------------------------------
+
+def tree_outbound_by_hub_season(m):
+    """{(i, b): expected total outbound vehicle-units (rebalancing +
+    redeployment together) from hub i during season b}."""
+    tree = m.tree
+    B = sorted(tree.e)
+    result = {(i, b): 0.0 for i in m.N for b in B}
+    for n in tree.nodes_with_stage_ge1():
+        node = tree.nodes[n]
+        b = node.stage
+        L = tree.block_length(n)
+        for i in m.N:
+            total = sum(m._get_val(f"y[{n},{i},{j},{k},{t}]")
+                        for j in m.N if (i, j) in m.A
+                        for k in m.K for t in range(1, L + 1))
+            result[i, b] += node.prob * total
+    return result
+
+
+def static_outbound_by_hub_season(m, total_weeks):
+    """Static has no rebalancing lever at all."""
+    B, _, _ = _season_weeks(m)
+    return {(i, b): 0.0 for i in m.N for b in B}
+
+
+def mnp_outbound_by_hub_season(m, total_weeks):
+    """MNP has no rebalancing lever at all."""
+    B, _, _ = _season_weeks(m)
+    return {(i, b): 0.0 for i in m.N for b in B}
+
+
+def mrp_outbound_by_hub_season(m, total_weeks):
+    B, season_of_week, _ = _season_weeks(m)
+    result = {(i, b): 0.0 for i in m.N for b in B}
+    for i in m.N:
+        for t in range(total_weeks):
+            b = season_of_week[t]
+            for o in m.O:
+                result[i, b] += m.p_omega(o) * sum(
+                    m._get_val(f"y[{i},{j},{k},{t},{o}]") for j in m.N for k in m.K)
+    return result
+
+
+def tree_corrective_by_hub_season(m):
+    """{(i, b): expected corrective-subcontracted vehicle-units at hub i
+    during season b}."""
+    tree = m.tree
+    B = sorted(tree.e)
+    result = {(i, b): 0.0 for i in m.N for b in B}
+    for n in tree.nodes_with_stage_ge1():
+        node = tree.nodes[n]
+        b = node.stage
+        L = tree.block_length(n)
+        for i in m.N:
+            total = sum(m._get_val(f"stilde[{n},{i},{k},{t}]") for k in m.K for t in range(1, L + 1))
+            result[i, b] += node.prob * total
+    return result
+
+
+def static_corrective_by_hub_season(m, total_weeks):
+    """Static has no corrective subcontracting at all."""
+    B, _, _ = _season_weeks(m)
+    return {(i, b): 0.0 for i in m.N for b in B}
+
+
+def mnp_corrective_by_hub_season(m, total_weeks):
+    B, season_of_week, _ = _season_weeks(m)
+    result = {(i, b): 0.0 for i in m.N for b in B}
+    for i in m.N:
+        for t in range(total_weeks):
+            b = season_of_week[t]
+            for o in m.O:
+                result[i, b] += m.p_omega(o) * sum(
+                    m._get_val(f"s_corr[{i},{k},{t},{o}]") for k in m.K)
+    return result
+
+
+def mrp_corrective_by_hub_season(m, total_weeks):
+    """MRP's s_corr has the identical shape/index convention as MNP's."""
+    return mnp_corrective_by_hub_season(m, total_weeks)
+
+
+def save_hub_season_table(by_model, N, B, output_path, value_label="qty"):
+    """by_model: {model_key: {(i, b): qty}} (see *_outbound_by_hub_season /
+    *_corrective_by_hub_season above). Writes model, hub, season, <value_label>."""
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "hub", "season", value_label])
+        for model_key in MODEL_ORDER:
+            d = by_model[model_key]
+            for i in N:
+                for b in B:
+                    writer.writerow([MODEL_LABELS[model_key], i, b, d[i, b]])
+    print(f"{value_label} by hub/season saved to {output_path}")
+
+
+# ---------------------------------------------------------------------------
+# PER-SCENARIO (realized, NOT probability-weighted) breakdowns BY HUB AND
+# SEASON -- same two metrics as *_outbound_by_hub_season / *_corrective_by_
+# hub_season above, but keeping every scenario o separate instead of
+# collapsing to an expectation. Returns {(i, b, o): qty}.
+# ---------------------------------------------------------------------------
+
+def tree_scenario_outbound_by_hub_season(m):
+    """{(i, b, o): total outbound vehicle-units (rebalancing + redeployment
+    together) from hub i during season b, realized along scenario o's own
+    root-to-leaf path (no probability weighting)."""
+    tree = m.tree
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            b = node.stage
+            L = tree.block_length(n)
+            for i in m.N:
+                total = sum(m._get_val(f"y[{n},{i},{j},{k},{t}]")
+                            for j in m.N if (i, j) in m.A
+                            for k in m.K for t in range(1, L + 1))
+                result[i, b, o] = total
+    return result
+
+
+def static_scenario_outbound_by_hub_season(m, total_weeks):
+    B, _, _ = _season_weeks(m)
+    return {(i, b, o): 0.0 for i in m.N for b in B for o in m.O}
+
+
+def mnp_scenario_outbound_by_hub_season(m, total_weeks):
+    """MNP has no rebalancing lever at all."""
+    B, _, _ = _season_weeks(m)
+    return {(i, b, o): 0.0 for i in m.N for b in B for o in m.O}
+
+
+def mrp_scenario_outbound_by_hub_season(m, total_weeks):
+    B, season_of_week, _ = _season_weeks(m)
+    result = {(i, b, o): 0.0 for i in m.N for b in B for o in m.O}
+    for i in m.N:
+        for t in range(total_weeks):
+            b = season_of_week[t]
+            for o in m.O:
+                result[i, b, o] += sum(m._get_val(f"y[{i},{j},{k},{t},{o}]") for j in m.N for k in m.K)
+    return result
+
+
+def tree_scenario_corrective_by_hub_season(m):
+    """{(i, b, o): corrective-subcontracted vehicle-units at hub i during
+    season b, realized along scenario o's own root-to-leaf path."""
+    tree = m.tree
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            b = node.stage
+            L = tree.block_length(n)
+            for i in m.N:
+                total = sum(m._get_val(f"stilde[{n},{i},{k},{t}]") for k in m.K for t in range(1, L + 1))
+                result[i, b, o] = total
+    return result
+
+
+def static_scenario_corrective_by_hub_season(m, total_weeks):
+    B, _, _ = _season_weeks(m)
+    return {(i, b, o): 0.0 for i in m.N for b in B for o in m.O}
+
+
+def mnp_scenario_corrective_by_hub_season(m, total_weeks):
+    B, season_of_week, _ = _season_weeks(m)
+    result = {(i, b, o): 0.0 for i in m.N for b in B for o in m.O}
+    for i in m.N:
+        for t in range(total_weeks):
+            b = season_of_week[t]
+            for o in m.O:
+                result[i, b, o] += sum(m._get_val(f"s_corr[{i},{k},{t},{o}]") for k in m.K)
+    return result
+
+
+def mrp_scenario_corrective_by_hub_season(m, total_weeks):
+    """MRP's s_corr has the identical shape/index convention as MNP's."""
+    return mnp_scenario_corrective_by_hub_season(m, total_weeks)
+
+
+def save_hub_season_scenario_table(by_model, N, B, output_path, value_label="qty"):
+    """by_model: {model_key: {(i, b, o): qty}} (see *_scenario_outbound_by_hub_season /
+    *_scenario_corrective_by_hub_season above). Writes model, hub, season, scenario, <value_label>."""
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["model", "hub", "season", "scenario", value_label])
+        for model_key in MODEL_ORDER:
+            d = by_model[model_key]
+            n_scenarios = len({o for i, b, o in d})
+            for i in N:
+                for b in B:
+                    for o in range(n_scenarios):
+                        writer.writerow([MODEL_LABELS[model_key], i, b, o, d[i, b, o]])
+    print(f"{value_label} by hub/season/scenario saved to {output_path}")
+
+
 def _parse_var_index(token):
     try:
         return int(token)
@@ -682,27 +1095,24 @@ def save_solve_log(exp_dir, results, solve_times, label=""):
 
 def tree_green_coverage_ratios(m):
     """Mirrors ScenarioTreeModel.py's green constraint exactly: coverage[k] =
-    x[n,i,k,t] + s[n,i,k] - s[parent,i,k] (0 if stage==1) + stilde[n,i,k,t],
-    green requirement = sum(q[k]*coverage[k] for k in K_green) >= theta[i]*demand."""
+    x[n,i,k,t] + s[n,i,k] + stilde[n,i,k,t], green requirement =
+    sum(q[k]*coverage[k] for k in K_green) >= theta[i]*demand."""
     tree = m.tree
     result = {}
     for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
         week_offset = 0
-        for idx, n in enumerate(ancestry):
+        for n in ancestry:
             node = tree.nodes[n]
             if node.stage == 0:
                 continue
-            parent_id = ancestry[idx - 1]
             L = tree.block_length(n)
             for t_local in range(1, L + 1):
                 global_week = week_offset + t_local - 1
                 for i in m.N:
                     coverage = 0.0
                     for k in m.K_green:
-                        cov_k = m._get_val(f"x[{n},{i},{k},{t_local}]") + m._get_val(f"s[{n},{i},{k}]")
-                        if node.stage > 1:
-                            cov_k -= m._get_val(f"s[{parent_id},{i},{k}]")
-                        cov_k += m._get_val(f"stilde[{n},{i},{k},{t_local}]")
+                        cov_k = (m._get_val(f"x[{n},{i},{k},{t_local}]") + m._get_val(f"s[{n},{i},{k}]")
+                                 + m._get_val(f"stilde[{n},{i},{k},{t_local}]"))
                         coverage += m.q[k] * cov_k
                     demand = node.demand[i, t_local]
                     required = m.theta[i] * demand
@@ -874,8 +1284,11 @@ def _mrp_resource(m, N, K, total_weeks):
             for i in N for k in K for t in range(total_weeks)}
 
 
-def _extract_two_stage_result(m, N, K, cost_fn, resource_fn, scenario_cost_fn, scenario_qty_fn,
-                               green_ratio_fn, qty_by_type_fn, demand_coverage_fn):
+def _extract_two_stage_result(m, N, K, total_weeks, cost_fn, resource_fn, scenario_cost_fn, scenario_qty_fn,
+                               green_ratio_fn, qty_by_type_fn, demand_coverage_fn,
+                               subcontracting_by_period_fn, rebalancing_qty_fn,
+                               outbound_hub_season_fn, corrective_hub_season_fn,
+                               scenario_outbound_hub_season_fn, scenario_corrective_hub_season_fn):
     status = m.model.status
     solved = status in (2, 9)  # GRB.OPTIMAL, GRB.SUBOPTIMAL/TIME_LIMIT-with-incumbent
     return {
@@ -890,10 +1303,17 @@ def _extract_two_stage_result(m, N, K, cost_fn, resource_fn, scenario_cost_fn, s
         "green_ratios": green_ratio_fn(m),
         "scenario_quantities_by_type": qty_by_type_fn(m),
         "demand_coverage": demand_coverage_fn(m),
+        "scenario_subcontracting_extremes": subcontracting_period_extremes(
+            subcontracting_by_period_fn(m), K, total_weeks),
+        "scenario_rebalancing_quantities": rebalancing_qty_fn(m),
+        "outbound_by_hub_season": outbound_hub_season_fn(m, total_weeks),
+        "corrective_by_hub_season": corrective_hub_season_fn(m, total_weeks),
+        "scenario_outbound_by_hub_season": scenario_outbound_hub_season_fn(m, total_weeks),
+        "scenario_corrective_by_hub_season": scenario_corrective_hub_season_fn(m, total_weeks),
     }
 
 
-def _tree_result(tree_model, N, K):
+def _tree_result(tree_model, N, K, total_weeks):
     status = tree_model.model.status
     solved = status in (2, 9)
     return {
@@ -906,6 +1326,13 @@ def _tree_result(tree_model, N, K):
         "scenario_quantities": tree_scenario_subcontracting_quantities(tree_model),
         "green_ratios": tree_green_coverage_ratios(tree_model),
         "scenario_quantities_by_type": tree_scenario_quantities_by_type(tree_model),
+        "scenario_subcontracting_extremes": subcontracting_period_extremes(
+            tree_scenario_subcontracting_by_period(tree_model), K, total_weeks),
+        "scenario_rebalancing_quantities": tree_scenario_rebalancing_quantities(tree_model),
+        "outbound_by_hub_season": tree_outbound_by_hub_season(tree_model),
+        "corrective_by_hub_season": tree_corrective_by_hub_season(tree_model),
+        "scenario_outbound_by_hub_season": tree_scenario_outbound_by_hub_season(tree_model),
+        "scenario_corrective_by_hub_season": tree_scenario_corrective_by_hub_season(tree_model),
         "demand_coverage": tree_scenario_demand_coverage(tree_model),
     }
 
@@ -1095,9 +1522,13 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     m.solve_static(params=static_params)
     t_static = time.time() - t0
     static_result = _extract_two_stage_result(
-        m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
+        m, N, K, total_weeks, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
-        static_scenario_quantities_by_type, static_scenario_demand_coverage)
+        static_scenario_quantities_by_type, static_scenario_demand_coverage,
+        lambda mm: static_scenario_subcontracting_by_period(mm, total_weeks),
+        static_scenario_rebalancing_quantities,
+        static_outbound_by_hub_season, static_corrective_by_hub_season,
+        static_scenario_outbound_by_hub_season, static_scenario_corrective_by_hub_season)
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "static.pkl"))
 
@@ -1108,9 +1539,13 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     m.solve_MNP(params=mnp_params)
     t_mnp = time.time() - t0
     mnp_result = _extract_two_stage_result(
-        m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
+        m, N, K, total_weeks, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
-        mnp_scenario_quantities_by_type, mnp_scenario_demand_coverage)
+        mnp_scenario_quantities_by_type, mnp_scenario_demand_coverage,
+        lambda mm: mnp_scenario_subcontracting_by_period(mm, total_weeks),
+        mnp_scenario_rebalancing_quantities,
+        mnp_outbound_by_hub_season, mnp_corrective_by_hub_season,
+        mnp_scenario_outbound_by_hub_season, mnp_scenario_corrective_by_hub_season)
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "mnp.pkl"))
 
@@ -1121,9 +1556,13 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     m.solve_MRP(params=mrp_params)
     t_mrp = time.time() - t0
     mrp_result = _extract_two_stage_result(
-        m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
+        m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
-        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage
+        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage,
+        lambda mm: mrp_scenario_subcontracting_by_period(mm, total_weeks),
+        mrp_scenario_rebalancing_quantities,
+        mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
+        mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
     )
     if make_plots:
         save_all_variables(m, os.path.join(plot_dir, "variables", "mrp.pkl"))
@@ -1131,7 +1570,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     # being able to query it live, right after this call.
 
     results = {
-        "tree": _tree_result(tree_model, N, K),
+        "tree": _tree_result(tree_model, N, K, total_weeks),
         "static": static_result,
         "mnp": mnp_result,
         "mrp": mrp_result,
@@ -1152,6 +1591,21 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         save_flat_scenarios(d_real, leaf_prob, N, total_weeks,
                              os.path.join(plot_dir, "flat_scenarios.csv"))
         save_scenario_quantities_by_type(results, K, os.path.join(plot_dir, "scenario_quantities.csv"))
+        save_subcontracting_extremes_table(results, K, os.path.join(plot_dir, "subcontracting_extremes.csv"))
+        save_rebalancing_movement_table(results, os.path.join(plot_dir, "rebalancing_movements.csv"))
+        B = sorted(tree.e)
+        save_hub_season_table({mk: results[mk]["outbound_by_hub_season"] for mk in MODEL_ORDER}, N, B,
+                               os.path.join(plot_dir, "outbound_by_hub_season.csv"),
+                               value_label="expected_outbound_qty")
+        save_hub_season_table({mk: results[mk]["corrective_by_hub_season"] for mk in MODEL_ORDER}, N, B,
+                               os.path.join(plot_dir, "corrective_by_hub_season.csv"),
+                               value_label="expected_corrective_qty")
+        save_hub_season_scenario_table(
+            {mk: results[mk]["scenario_outbound_by_hub_season"] for mk in MODEL_ORDER}, N, B,
+            os.path.join(plot_dir, "outbound_by_hub_season_scenario.csv"), value_label="outbound_qty")
+        save_hub_season_scenario_table(
+            {mk: results[mk]["scenario_corrective_by_hub_season"] for mk in MODEL_ORDER}, N, B,
+            os.path.join(plot_dir, "corrective_by_hub_season_scenario.csv"), value_label="corrective_qty")
         save_solve_log(plot_dir, results, solve_times)
 
     return tree_model, m, results
@@ -1169,7 +1623,7 @@ if __name__ == "__main__":
     seed = None
     season_drift = (0.20,0.25)
     sibling_drift_correlation = 1
-    noise_frac = 0.15
+    noise_frac = 0.05
 
     compare(seasons=(1, 2, 3, 4), weeks_per_season= 13, branching=2,
             n_hubs=3, n_types=3, hub_correlation=hub_correlation,

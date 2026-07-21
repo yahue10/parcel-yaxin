@@ -134,6 +134,18 @@ def solve_instance(instance_cfg):
         static_scenario_quantities_by_type, mnp_scenario_quantities_by_type,
         mrp_scenario_quantities_by_type,
         static_scenario_demand_coverage, mnp_scenario_demand_coverage, mrp_scenario_demand_coverage,
+        static_scenario_subcontracting_by_period, mnp_scenario_subcontracting_by_period,
+        mrp_scenario_subcontracting_by_period,
+        static_scenario_rebalancing_quantities, mnp_scenario_rebalancing_quantities,
+        mrp_scenario_rebalancing_quantities,
+        static_outbound_by_hub_season, mnp_outbound_by_hub_season, mrp_outbound_by_hub_season,
+        static_corrective_by_hub_season, mnp_corrective_by_hub_season, mrp_corrective_by_hub_season,
+        static_scenario_outbound_by_hub_season, mnp_scenario_outbound_by_hub_season,
+        mrp_scenario_outbound_by_hub_season,
+        static_scenario_corrective_by_hub_season, mnp_scenario_corrective_by_hub_season,
+        mrp_scenario_corrective_by_hub_season,
+        save_subcontracting_extremes_table, save_rebalancing_movement_table, save_hub_season_table,
+        save_hub_season_scenario_table,
         _extract_two_stage_result, _tree_result, _flat_resource, _mrp_resource, save_solve_log,
         _params_with_log_file,
     )
@@ -202,9 +214,13 @@ def solve_instance(instance_cfg):
     static_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "static.log"))
     m.solve_static(params=static_params, options=GUROBI_OPTIONS)
     static_result = _extract_two_stage_result(
-        m, N, K, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
+        m, N, K, total_weeks, static_cost_breakdown, _flat_resource, static_scenario_cost_breakdown,
         static_scenario_subcontracting_quantities, static_green_coverage_ratios,
-        static_scenario_quantities_by_type, static_scenario_demand_coverage)
+        static_scenario_quantities_by_type, static_scenario_demand_coverage,
+        lambda mm: static_scenario_subcontracting_by_period(mm, total_weeks),
+        static_scenario_rebalancing_quantities,
+        static_outbound_by_hub_season, static_corrective_by_hub_season,
+        static_scenario_outbound_by_hub_season, static_scenario_corrective_by_hub_season)
     save_all_variables(m, os.path.join(exp_dir, "variables", "static.pkl"))
     t_static = time.time() - t0
     print(f"[{label}] Static done in {t_static:.1f}s obj={static_result['obj']}")
@@ -213,9 +229,13 @@ def solve_instance(instance_cfg):
     mnp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mnp.log"))
     m.solve_MNP(params=mnp_params, options=GUROBI_OPTIONS)
     mnp_result = _extract_two_stage_result(
-        m, N, K, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
+        m, N, K, total_weeks, mnp_cost_breakdown, _flat_resource, mnp_scenario_cost_breakdown,
         mnp_scenario_subcontracting_quantities, mnp_green_coverage_ratios,
-        mnp_scenario_quantities_by_type, mnp_scenario_demand_coverage)
+        mnp_scenario_quantities_by_type, mnp_scenario_demand_coverage,
+        lambda mm: mnp_scenario_subcontracting_by_period(mm, total_weeks),
+        mnp_scenario_rebalancing_quantities,
+        mnp_outbound_by_hub_season, mnp_corrective_by_hub_season,
+        mnp_scenario_outbound_by_hub_season, mnp_scenario_corrective_by_hub_season)
     save_all_variables(m, os.path.join(exp_dir, "variables", "mnp.pkl"))
     t_mnp = time.time() - t0
     print(f"[{label}] MNP done in {t_mnp:.1f}s obj={mnp_result['obj']}")
@@ -224,9 +244,13 @@ def solve_instance(instance_cfg):
     mrp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mrp.log"))
     m.solve_MRP(params=mrp_params, options=GUROBI_OPTIONS)
     mrp_result = _extract_two_stage_result(
-        m, N, K, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
+        m, N, K, total_weeks, mrp_cost_breakdown, lambda mm, NN, KK: _mrp_resource(mm, NN, KK, total_weeks),
         mrp_scenario_cost_breakdown, mrp_scenario_subcontracting_quantities, mrp_green_coverage_ratios,
-        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage
+        mrp_scenario_quantities_by_type, mrp_scenario_demand_coverage,
+        lambda mm: mrp_scenario_subcontracting_by_period(mm, total_weeks),
+        mrp_scenario_rebalancing_quantities,
+        mrp_outbound_by_hub_season, mrp_corrective_by_hub_season,
+        mrp_scenario_outbound_by_hub_season, mrp_scenario_corrective_by_hub_season
     )
     save_all_variables(m, os.path.join(exp_dir, "variables", "mrp.pkl"))
     t_mrp = time.time() - t0
@@ -235,7 +259,7 @@ def solve_instance(instance_cfg):
     # plots rely on being able to query it live, right after this call.
 
     results = {
-        "tree": _tree_result(tree_model, N, K),
+        "tree": _tree_result(tree_model, N, K, total_weeks),
         "static": static_result,
         "mnp": mnp_result,
         "mrp": mrp_result,
@@ -263,6 +287,21 @@ def solve_instance(instance_cfg):
     d_real, _, _ = build_full_horizon_scenarios(tree, N)
     save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"))
     save_scenario_quantities_by_type(results, K, os.path.join(exp_dir, "scenario_quantities.csv"))
+    save_subcontracting_extremes_table(results, K, os.path.join(exp_dir, "subcontracting_extremes.csv"))
+    save_rebalancing_movement_table(results, os.path.join(exp_dir, "rebalancing_movements.csv"))
+    B = sorted(tree.e)
+    save_hub_season_table({mk: results[mk]["outbound_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
+                           N, B, os.path.join(exp_dir, "outbound_by_hub_season.csv"),
+                           value_label="expected_outbound_qty")
+    save_hub_season_table({mk: results[mk]["corrective_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
+                           N, B, os.path.join(exp_dir, "corrective_by_hub_season.csv"),
+                           value_label="expected_corrective_qty")
+    save_hub_season_scenario_table(
+        {mk: results[mk]["scenario_outbound_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
+        N, B, os.path.join(exp_dir, "outbound_by_hub_season_scenario.csv"), value_label="outbound_qty")
+    save_hub_season_scenario_table(
+        {mk: results[mk]["scenario_corrective_by_hub_season"] for mk in ("tree", "static", "mnp", "mrp")},
+        N, B, os.path.join(exp_dir, "corrective_by_hub_season_scenario.csv"), value_label="corrective_qty")
     save_solve_log(exp_dir, results, result["solve_times"], label=label)
 
     with open(os.path.join(exp_dir, "result.pkl"), "wb") as f:
