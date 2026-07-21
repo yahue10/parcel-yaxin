@@ -19,12 +19,14 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import matplotlib.animation as animation
 from matplotlib.lines import Line2D
 
 from compare_tree_vs_two_stage import (
     MODEL_LABELS, MODEL_ORDER, K_LABELS, RELEVANT_SCENARIO_COMPONENTS, SCENARIO_COMPONENT_ABBR,
     build_full_horizon_scenarios, leaf_paths, _season_weeks,
 )
+from ScenarioTreeModel import ScenarioTreeVehicleAllocationModel
 
 MODEL_COLORS = {"tree": "#4C72B0", "static": "#DD8452", "mnp": "#55A868", "mrp": "#C44E52"}
 MODEL_LINESTYLES = {"tree": "-", "static": ":", "mnp": "-.", "mrp": "--"}
@@ -497,6 +499,33 @@ def _mrp_rebalancing_matrix_per_scenario(mrp_model, N):
     return result
 
 
+def _mrp_is_tree_shaped(mrp_model):
+    """True when `mrp_model` is a ScenarioTreeVehicleAllocationModel -- i.e.
+    compare_tree_vs_two_stage.compare(mrp_variant="tree") was used -- rather
+    than a flat two-stage VehicleAllocationModel. Used throughout this file
+    to dispatch to the tree-shaped extraction functions (y[n,i,j,k,t]-style
+    variable names) instead of the flat ones (y[i,j,k,t,o]-style) for
+    whichever object `mrp_model` actually is."""
+    return isinstance(mrp_model, ScenarioTreeVehicleAllocationModel)
+
+
+def _mrp_rebalancing_by_week(mrp_model):
+    """{o: {week: realized rebalancing that week}}, dispatching to the
+    tree-shaped extraction when mrp_model is MRP_tree."""
+    if _mrp_is_tree_shaped(mrp_model):
+        result, _ = _tree_rebalancing_by_week_per_scenario(mrp_model)
+        return result
+    return _mrp_rebalancing_by_week_per_scenario(mrp_model)
+
+
+def _mrp_rebalancing_matrix(mrp_model, N):
+    """{o: hub x hub matrix}, dispatching to the tree-shaped extraction when
+    mrp_model is MRP_tree."""
+    if _mrp_is_tree_shaped(mrp_model):
+        return _tree_rebalancing_matrix_per_scenario(mrp_model, N)
+    return _mrp_rebalancing_matrix_per_scenario(mrp_model, N)
+
+
 def _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks):
     """
     Picks the 3 "interesting" scenarios shown by the rebalancing plots,
@@ -517,7 +546,7 @@ def _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks):
     o_best_demand = min(total_demand, key=total_demand.get)
 
     tree_weekly_by_o, _ = _tree_rebalancing_by_week_per_scenario(tree_model)
-    mrp_weekly_by_o = _mrp_rebalancing_by_week_per_scenario(mrp_model)
+    mrp_weekly_by_o = _mrp_rebalancing_by_week(mrp_model)
     tree_total_rebal = {o: sum(w.values()) for o, w in tree_weekly_by_o.items()}
     mrp_total_rebal = {o: sum(w.values()) for o, w in mrp_weekly_by_o.items()}
     o_tree_most_rebal = max(tree_total_rebal, key=tree_total_rebal.get)
@@ -538,7 +567,7 @@ def plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, sa
     models), and each model's own busiest-rebalancing scenario."""
     sel = _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks)
     tree_weekly_by_o, _ = _tree_rebalancing_by_week_per_scenario(tree_model)
-    mrp_weekly_by_o = _mrp_rebalancing_by_week_per_scenario(mrp_model)
+    mrp_weekly_by_o = _mrp_rebalancing_by_week(mrp_model)
     boundaries = _season_boundary_weeks(tree_model.tree)
 
     rows = [
@@ -585,7 +614,7 @@ def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, save
     (not an expectation across all scenarios)."""
     sel = _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks)
     tree_mat_by_o = _tree_rebalancing_matrix_per_scenario(tree_model, N)
-    mrp_mat_by_o = _mrp_rebalancing_matrix_per_scenario(mrp_model, N)
+    mrp_mat_by_o = _mrp_rebalancing_matrix(mrp_model, N)
 
     rows = [
         ("Highest Total Demand (All Hubs, All Weeks)", sel["o_worst_demand"], sel["o_worst_demand"]),
@@ -624,6 +653,163 @@ def plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, save
         fig.savefig(os.path.join(output_dir, "compare_rebalancing_heatmap.png"), dpi=150, bbox_inches="tight")
     plt.close(fig)
     return fig
+
+
+# ---------------------------------------------------------------------------
+# Animated rebalancing-transfer GIF: one frame per week, hub x hub heatmap,
+# tree vs MRP side by side, for ONE scenario held fixed across the whole
+# animation -- shows how the rebalancing plan actually unfolds week by week,
+# rather than the static heatmap's all-weeks-summed snapshot.
+# ---------------------------------------------------------------------------
+
+def _tree_rebalancing_matrix_by_week_per_scenario(tree_model, N):
+    """{o: {week: hub x hub matrix}} realized rebalancing (per week, all
+    types) for each leaf/scenario o -- same idea as
+    _tree_rebalancing_matrix_per_scenario but keeping each week separate
+    instead of summing across the whole horizon."""
+    tree = tree_model.tree
+    idx = {i: p for p, i in enumerate(N)}
+    result = {}
+    for o, (leaf_id, prob, ancestry) in enumerate(leaf_paths(tree)):
+        weekly = {}
+        week_offset = 0
+        for n in ancestry:
+            node = tree.nodes[n]
+            if node.stage == 0:
+                continue
+            L = tree.block_length(n)
+            for t_local in range(1, L + 1):
+                w = week_offset + t_local - 1
+                mat = np.zeros((len(N), len(N)))
+                for (i, j) in tree_model.A:
+                    mat[idx[i], idx[j]] = sum(
+                        tree_model._get_val(f"y[{n},{i},{j},{k},{t_local}]") for k in tree_model.K
+                    )
+                weekly[w] = mat
+            week_offset += L
+        result[o] = weekly
+    return result
+
+
+def _mrp_rebalancing_matrix_by_week_per_scenario(mrp_model, N, total_weeks):
+    """{o: {week: hub x hub matrix}} realized rebalancing (per week, all
+    types) for each scenario o."""
+    idx = {i: p for p, i in enumerate(N)}
+    result = {}
+    for o in mrp_model.O:
+        weekly = {}
+        for t in range(total_weeks):
+            mat = np.zeros((len(N), len(N)))
+            for i in N:
+                for j in N:
+                    if i == j:
+                        continue
+                    mat[idx[i], idx[j]] = sum(
+                        mrp_model._get_val(f"y[{i},{j},{k},{t},{o}]") for k in mrp_model.K
+                    )
+            weekly[t] = mat
+        result[o] = weekly
+    return result
+
+
+def _mrp_rebalancing_matrix_by_week(mrp_model, N, total_weeks):
+    """{o: {week: hub x hub matrix}}, dispatching to the tree-shaped
+    extraction when mrp_model is MRP_tree."""
+    if _mrp_is_tree_shaped(mrp_model):
+        return _tree_rebalancing_matrix_by_week_per_scenario(mrp_model, N)
+    return _mrp_rebalancing_matrix_by_week_per_scenario(mrp_model, N, total_weeks)
+
+
+def plot_rebalancing_gif(tree_model, mrp_model, N, total_weeks, scenario="highest_demand",
+                          save=True, output_dir=".", duration_ms=400, instance_label=""):
+    """
+    Animated GIF: one frame per week, hub x hub heatmap of that week's
+    realized rebalancing transfers, tree vs MRP side by side, for ONE
+    scenario held fixed across the whole animation (color scale is shared
+    across every week and both models, so magnitude is comparable
+    frame-to-frame, not auto-rescaled per frame).
+
+    scenario : which scenario to animate --
+      - "highest_demand" (default) / "lowest_demand": total realized demand
+        across all hubs/weeks, shared between tree and MRP since both solve
+        the identical underlying demand paths (see _select_rebalancing_scenarios).
+      - "highest_rebalancing": tree's own busiest-rebalancing scenario, used
+        for BOTH panels so they stay comparable frame-by-frame (MRP's own
+        busiest scenario can be a different index and isn't used here).
+      - an int: an explicit scenario index, used for both panels directly.
+
+    Saved to <output_dir>/rebalancing_gif/scenario_<o>.gif.
+    """
+    sel = _select_rebalancing_scenarios(tree_model, mrp_model, N, total_weeks)
+    if isinstance(scenario, int):
+        o = scenario
+    elif scenario == "highest_demand":
+        o = sel["o_worst_demand"]
+    elif scenario == "lowest_demand":
+        o = sel["o_best_demand"]
+    elif scenario == "highest_rebalancing":
+        o = sel["o_tree_most_rebal"]
+    else:
+        raise ValueError(f"scenario must be an int or one of 'highest_demand'/'lowest_demand'/"
+                          f"'highest_rebalancing', got {scenario!r}")
+
+    tree_weekly = _tree_rebalancing_matrix_by_week_per_scenario(tree_model, N)[o]
+    mrp_weekly = _mrp_rebalancing_matrix_by_week(mrp_model, N, total_weeks)[o]
+
+    vmax = max(max(mat.max() for mat in tree_weekly.values()),
+               max(mat.max() for mat in mrp_weekly.values()))
+    vmax = max(vmax, 1e-9)
+
+    season_of_week = {}
+    offset = 0
+    for b in sorted(tree_model.tree.e):
+        L = tree_model.tree.e[b]
+        for w in range(offset, offset + L):
+            season_of_week[w] = b
+        offset += L
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
+    ims = []
+    for ax, model_label in zip(axes, [MODEL_LABELS["tree"], MODEL_LABELS["mrp"]]):
+        im = ax.imshow(np.zeros((len(N), len(N))), cmap="Blues", vmin=0, vmax=vmax)
+        ax.set_xticks(range(len(N)))
+        ax.set_yticks(range(len(N)))
+        ax.set_xticklabels([f"Hub {j}" for j in N])
+        ax.set_yticklabels([f"Hub {i}" for i in N])
+        ax.set_xlabel("To")
+        ax.set_ylabel("From")
+        ax.set_title(model_label, fontsize=11)
+        ims.append(im)
+    fig.colorbar(ims[-1], ax=axes, shrink=0.7, label="Vehicles moved that week")
+    suptitle = fig.suptitle("", fontsize=13)
+
+    def update(week):
+        for ax, im, weekly in zip(axes, ims, [tree_weekly, mrp_weekly]):
+            mat = weekly[week]
+            im.set_data(mat)
+            for txt in ax.texts[:]:
+                txt.remove()
+            for pi in range(len(N)):
+                for pj in range(len(N)):
+                    if pi == pj:
+                        continue
+                    val = mat[pi, pj]
+                    color = "white" if val > vmax * 0.6 else "black"
+                    ax.text(pj, pi, f"{val:,.0f}", ha="center", va="center", fontsize=9, color=color)
+        suptitle.set_text(f"Rebalancing Transfers — Scenario {o} — Week {week + 1}/{total_weeks} "
+                           f"(Season {season_of_week[week]})")
+        return ims
+
+    anim = animation.FuncAnimation(fig, update, frames=range(total_weeks), blit=False)
+    subdir = os.path.join(output_dir, "rebalancing_gif")
+    os.makedirs(subdir, exist_ok=True)
+    gif_path = os.path.join(subdir, f"scenario_{o}.gif")
+    if save:
+        anim.save(gif_path, writer=animation.PillowWriter(fps=1000 / duration_ms))
+    plt.close(fig)
+    tag = f"[{instance_label}] " if instance_label else ""
+    print(f"{tag}Rebalancing transfer GIF saved to {gif_path}")
+    return gif_path
 
 
 def plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=None, output_dir=".", instance_label=""):
@@ -825,6 +1011,22 @@ def _mrp_residual_capacity(mrp_model, N, K, total_weeks):
     return result
 
 
+def _mrp_resource_decomp(mrp_model, total_weeks):
+    """(result, n_scenarios), dispatching to the tree-shaped extraction when
+    mrp_model is MRP_tree."""
+    if _mrp_is_tree_shaped(mrp_model):
+        return _tree_resource_decomposition(mrp_model)
+    return _mrp_resource_decomposition(mrp_model, total_weeks)
+
+
+def _mrp_residual(mrp_model, N, K, total_weeks):
+    """{(i, t, o): coverage - demand}, dispatching to the tree-shaped
+    extraction when mrp_model is MRP_tree."""
+    if _mrp_is_tree_shaped(mrp_model):
+        return _tree_residual_capacity(mrp_model, N, K)
+    return _mrp_residual_capacity(mrp_model, N, K, total_weeks)
+
+
 def _plot_resource_decomposition_model(model_key, decomp, residual, N, K, total_weeks, n_scenarios,
                                         output_dir, boundaries=None):
     """One figure per scenario o: one subplot per hub, 3 grouped bars per
@@ -925,9 +1127,9 @@ def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_w
     """Tree & MRP only (see module note above). One figure per (model,
     scenario), saved under resource_decomposition/<tree|mrp>/scenario_<o>.png."""
     tree_decomp, n_tree = _tree_resource_decomposition(tree_model)
-    mrp_decomp, n_mrp = _mrp_resource_decomposition(mrp_model, total_weeks)
+    mrp_decomp, n_mrp = _mrp_resource_decomp(mrp_model, total_weeks)
     tree_residual = _tree_residual_capacity(tree_model, N, K)
-    mrp_residual = _mrp_residual_capacity(mrp_model, N, K, total_weeks)
+    mrp_residual = _mrp_residual(mrp_model, N, K, total_weeks)
     boundaries = _season_boundary_weeks(tree_model.tree)
 
     _plot_resource_decomposition_model("tree", tree_decomp, tree_residual, N, K, total_weeks,
@@ -940,26 +1142,22 @@ def plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_w
           f"{os.path.join(output_dir, 'resource_decomposition')}/ ({n_tree + n_mrp} figures)")
 
 
-def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, output_dir=".", instance_label="",
-                          skip_mrp_live_plots=False):
+def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, output_dir=".", instance_label=""):
     """Generate all comparison plots and a text cost summary in output_dir.
 
-    `mrp_model` must be the shared VehicleAllocationModel instance right after
-    solve_MRP() was called on it (i.e. still in its MRP-solved state) — the
-    rebalancing plots query it live.
+    `mrp_model` is whichever model object compare_tree_vs_two_stage.compare()
+    actually solved for MRP -- a flat VehicleAllocationModel
+    (mrp_variant="flat", the default) or a ScenarioTreeVehicleAllocationModel
+    (mrp_variant="tree"). Either way it must be right after its solve call
+    (i.e. still in its MRP-solved state) -- the rebalancing/resource
+    -decomposition plots below query it live, dispatching to the matching
+    tree-shaped or flat extraction functions automatically based on its type
+    (see _mrp_is_tree_shaped).
 
     instance_label : optional prefix put in front of this function's own
-        confirmation prints (and threaded through to the two sub-functions
-        below that print their own), so concurrent runs' output stays
+        confirmation prints (and threaded through to the sub-functions below
+        that print their own), so concurrent runs' output stays
         distinguishable in the terminal.
-
-    skip_mrp_live_plots : set True when `mrp_model` is NOT a flat
-        VehicleAllocationModel with y[i,j,k,t,o]-style variable names -- e.g.
-        compare_tree_vs_two_stage.compare(mrp_variant="tree") passes a
-        ScenarioTreeVehicleAllocationModel instead, whose variables are named
-        y[n,i,j,k,t]. The 3 plots below query mrp_model's variables live (not
-        through `results`) and are hardcoded for the flat naming, so they're
-        skipped rather than silently producing wrong output.
     """
     os.makedirs(output_dir, exist_ok=True)
 
@@ -970,20 +1168,16 @@ def plot_all_comparisons(tree_model, mrp_model, results, N, K, total_weeks, outp
     plot_compare_subcontracting_quantities(results, output_dir=output_dir)
     plot_compare_green_ratio(results, output_dir=output_dir)
     plot_compare_demand_coverage(results, output_dir=output_dir)
-    if skip_mrp_live_plots:
-        tag = f"[{instance_label}] " if instance_label else ""
-        print(f"{tag}Skipping rebalancing-over-time/heatmap and resource-decomposition plots "
-              "-- mrp_model isn't a flat two-stage model (mrp_variant='tree').")
-    else:
-        plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
-        plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
+    plot_compare_rebalancing_over_time(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
+    plot_compare_rebalancing_heatmap(tree_model, mrp_model, N, total_weeks, output_dir=output_dir)
+    plot_rebalancing_gif(tree_model, mrp_model, N, total_weeks, scenario="highest_demand",
+                          output_dir=output_dir, instance_label=instance_label)
 
     d_real, leaf_prob, _ = build_full_horizon_scenarios(tree_model.tree, N)
     plot_demand_by_scenario(d_real, leaf_prob, N, total_weeks, tree=tree_model.tree, output_dir=output_dir,
                              instance_label=instance_label)
-    if not skip_mrp_live_plots:
-        plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir,
-                                                 instance_label=instance_label)
+    plot_resource_decomposition_by_scenario(tree_model, mrp_model, N, K, total_weeks, output_dir=output_dir,
+                                             instance_label=instance_label)
 
     tree_obj = results["tree"]["obj"]
 

@@ -50,9 +50,9 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 18000,
+    "TimeLimit": 2592000,
     "MIPGap": 0.01,
-    "Threads": 8,
+    "Threads": 32,
     "Presolve": 2,
 }
 
@@ -82,40 +82,37 @@ MAX_WORKERS = 6
 # cross-validation. Both produce the same results shape everywhere EXCEPT:
 # with "tree", the rebalancing-over-time/heatmap and resource-decomposition
 # plots are skipped (they're hardcoded for the flat model's variable names).
+# Optional "demand_source" key: "synthetic" (default) builds demand via
+# ScenarioTreeModel.build_toy_scenario_tree (random base level per hub).
+# "real" instead builds it via real_hub_data.build_real_data_scenario_tree --
+# real per-hub mean demand, real (repaired) inter-hub correlation, and real
+# per-hub weekly-noise scale, using the first n_hubs hubs listed in
+# data/negative_pairs_overlap20_within80km_first20hubs*.csv (capped at 20 --
+# that's all the data covers). season_drift/sibling_drift_correlation still
+# apply; hub_correlation/noise_frac are ignored with "real" (both come from
+# the data instead). Optional "data_dir" key overrides the "data" folder
+# path (only relevant with demand_source="real").
 INSTANCES = [
-    {"label": "hub4_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 4, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
-     "sibling_drift_correlation": 1, "noise_frac": 0.05,
-     "hub_correlation": [
-    [ 1.0, -0.7,  0.0,  0.0],
-    [-0.7,  1.0,  0.0,  0.0],
-    [ 0.0,  0.0,  1.0,  -0.6],
-    [ 0.0,  0.0,  -0.6,  1.0],
-        ]},
+    # demand_source="real" derives base demand, inter-hub correlation, and
+    # per-hub noise scale from data/negative_pairs_overlap20_within80km_first20hubs*.csv
+    # -- no more hand-picked hub_correlation matrix or noise_frac needed
+    # (both are ignored if given, since real data provides them instead).
+    # season_drift/sibling_drift_correlation still apply on top of the real
+    # base level. n_hubs picks the first N hubs listed in the data (capped
+    # at 20).
+    {"label": "hub16_real_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 3, "n_hubs": 16, "n_types": 3, "seed": 40,
+     "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
+     "demand_source": "real"},
 
-    {"label": "hub6_corr4_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
-     "sibling_drift_correlation": 1, "noise_frac": 0.15,
-     "hub_correlation": [
-    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0],
-    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0],
-    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3],
-    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0],
-        ]},
+    # Same n_hubs=6 shape twice, differentiated by seed (different
+    # season-drift/weekly-noise draws) instead of noise_frac/hub_correlation
+    # -- those aren't independent knobs anymore under demand_source="real".
+    {"label": "hub16_real_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 4, "n_hubs": 16, "n_types": 3, "seed": 43,
+     "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
+     "demand_source": "real"},
 
-    {"label": "hub6_corr3_b2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 6, "n_types": 3, "seed": 40, "season_drift": (0.20, 0.25), 
-     "sibling_drift_correlation": 1, "noise_frac": 0.05,
-     "hub_correlation": [
-    [ 1.0, -0.7,  0.0,  0.0,  0.0,  0.0],
-    [-0.7,  1.0,  0.0,  0.0,  0.0,  0.0],
-    [ 0.0,  0.0,  1.0,  0.6,  0.0,  0.0],
-    [ 0.0,  0.0,  0.6,  1.0,  0.0,  0.0],
-    [ 0.0,  0.0,  0.0,  0.0,  1.0,  -0.3],
-    [ 0.0,  0.0,  0.0,  0.0,  -0.3,  1.0],
-        ]},
 ]
 
 
@@ -134,6 +131,7 @@ def solve_instance(instance_cfg):
     matplotlib.use("Agg")
 
     from ScenarioTreeModel import build_toy_scenario_tree
+    from real_hub_data import build_real_data_scenario_tree
     from compare_tree_vs_two_stage import (
         build_tree_model, build_two_stage_model, build_mrp_tree_model, build_full_horizon_scenarios,
         save_flat_scenarios, save_scenario_quantities_by_type, save_all_variables,
@@ -175,11 +173,16 @@ def solve_instance(instance_cfg):
     mrp_variant = instance_cfg.get("mrp_variant", "flat")
     if mrp_variant not in ("flat", "tree"):
         raise ValueError(f"[{label}] mrp_variant must be 'flat' or 'tree', got {mrp_variant!r}")
+    demand_source = instance_cfg.get("demand_source", "synthetic")
+    if demand_source not in ("synthetic", "real"):
+        raise ValueError(f"[{label}] demand_source must be 'synthetic' or 'real', got {demand_source!r}")
+    data_dir = instance_cfg.get("data_dir", "data")
     N = list(range(instance_cfg["n_hubs"]))
     K = list(range(instance_cfg["n_types"]))
 
     print(f"[{label}] Starting: seasons={seasons}, weeks/season={weeks_per_season}, "
-          f"branching={branching}, hubs={len(N)}, types={len(K)}, seed={seed}, mrp_variant={mrp_variant}")
+          f"branching={branching}, hubs={len(N)}, types={len(K)}, seed={seed}, "
+          f"mrp_variant={mrp_variant}, demand_source={demand_source}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     exp_dir = os.path.join("experiments_tree_vs_two_stage", f"{label}_{timestamp}")
@@ -194,15 +197,28 @@ def solve_instance(instance_cfg):
         json.dump(instance_cfg, f, indent=2, default=str)
 
     # --- Build the instance: the scenario tree, then the scenarios derived from it ---
-    tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
-                        hub_correlation=hub_correlation, seed=seed)
-    if season_drift is not None:
-        tree_kwargs["season_drift"] = season_drift
-    if sibling_drift_correlation is not None:
-        tree_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
-    if noise_frac is not None:
-        tree_kwargs["noise_frac"] = noise_frac
-    tree = build_toy_scenario_tree(N, **tree_kwargs)
+    if demand_source == "real":
+        if hub_correlation is not None or noise_frac is not None:
+            print(f"[{label}] Note: hub_correlation/noise_frac are ignored with "
+                  "demand_source='real' -- both are derived from the real data instead.")
+        real_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season, seed=seed)
+        if season_drift is not None:
+            real_kwargs["season_drift"] = season_drift
+        if sibling_drift_correlation is not None:
+            real_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
+        tree, hub_meta = build_real_data_scenario_tree(len(N), data_dir=data_dir, **real_kwargs)
+        hub_list = ", ".join(f"{i}={hub_meta[i]['site']}" for i in hub_meta)
+        print(f"[{label}] Using real hub data: {hub_list}")
+    else:
+        tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
+                            hub_correlation=hub_correlation, seed=seed)
+        if season_drift is not None:
+            tree_kwargs["season_drift"] = season_drift
+        if sibling_drift_correlation is not None:
+            tree_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
+        if noise_frac is not None:
+            tree_kwargs["noise_frac"] = noise_frac
+        tree = build_toy_scenario_tree(N, **tree_kwargs)
     tree.validate(N)
 
     meta = {
@@ -327,7 +343,7 @@ def solve_instance(instance_cfg):
 
     if all(results[k]["obj"] is not None for k in ("tree", "static", "mnp", "mrp")):
         plot_all_comparisons(tree_model, mrp_model_for_plots, results, N, K, total_weeks, output_dir=exp_dir,
-                              instance_label=label, skip_mrp_live_plots=(mrp_variant == "tree"))
+                              instance_label=label)
 
     d_real, _, _ = build_full_horizon_scenarios(tree, N)
     save_flat_scenarios(d_real, leaf_prob, N, total_weeks, os.path.join(exp_dir, "flat_scenarios.csv"), label=label)

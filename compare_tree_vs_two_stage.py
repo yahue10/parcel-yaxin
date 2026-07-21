@@ -49,6 +49,7 @@ import numpy as np
 
 from ScenarioTreeModel import ScenarioTreeVehicleAllocationModel, build_toy_scenario_tree, ScenarioTree
 from Model import VehicleAllocationModel
+from real_hub_data import build_real_data_scenario_tree
 
 
 # ---------------------------------------------------------------------------
@@ -1548,7 +1549,8 @@ def report_green_constraint(results, tol=1e-6):
 def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
             hub_correlation=None, season_drift=None, sibling_drift_correlation=None,
-            noise_frac=None, make_plots=False, plot_dir="compare_plots", mrp_variant="flat"):
+            noise_frac=None, make_plots=False, plot_dir="compare_plots", mrp_variant="flat",
+            demand_source="synthetic", data_dir="data"):
     """
     seed : int or None. An int (the default, 42) reproduces the exact same
         instance every call — same demand tree, same everything. Pass
@@ -1568,14 +1570,27 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         -generating code (build_model(s_first_stage=True)) -- for
         cross-validation against the flat formulation. Both report/plot/save
         results the same way (the "mrp" slot in `results`, MODEL_ORDER, every
-        CSV), EXCEPT: with mrp_variant="tree", the 3 plots that query
-        mrp_model's variables live (rebalancing-over-time, rebalancing
-        -heatmap, resource-decomposition) are skipped, since they're
-        hardcoded for the flat model's y[i,j,k,t,o]-style variable names --
-        see plot_all_comparisons' skip_mrp_live_plots.
+        CSV, and every plot -- plots_tree_vs_two_stage.py auto-detects which
+        kind of model mrp_model is and dispatches to the matching
+        extraction functions, see its _mrp_is_tree_shaped).
+
+    demand_source : "synthetic" (default) builds the demand tree via
+        ScenarioTreeModel.build_toy_scenario_tree (random base level per
+        hub). "real" instead builds it via
+        real_hub_data.build_real_data_scenario_tree -- real per-hub mean
+        demand, real (repaired) inter-hub correlation, and real per-hub
+        weekly-noise scale, from data_dir's
+        negative_pairs_overlap20_within80km_first20hubs*.csv, using the
+        first n_hubs hubs listed there (capped at 20 -- that's all the data
+        covers). The season_drift/sibling_drift_correlation mechanism is
+        unchanged either way. hub_correlation/noise_frac are ignored (with
+        a printed note if explicitly set) when demand_source="real", since
+        real mode derives both from the data instead.
     """
     if mrp_variant not in ("flat", "tree"):
         raise ValueError(f"mrp_variant must be 'flat' or 'tree', got {mrp_variant!r}")
+    if demand_source not in ("synthetic", "real"):
+        raise ValueError(f"demand_source must be 'synthetic' or 'real', got {demand_source!r}")
     if seed is None:
         seed = random.SystemRandom().randrange(2**31)
         print(f"No seed given — using randomly generated seed={seed} "
@@ -1585,15 +1600,28 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
     K = list(range(n_types))
     solver_params = solver_params or {"TimeLimit": 600, "MIPGap": 0.01, "OutputFlag": 1}
 
-    tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
-                        hub_correlation=hub_correlation, seed=seed)
-    if season_drift is not None:
-        tree_kwargs["season_drift"] = season_drift
-    if sibling_drift_correlation is not None:
-        tree_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
-    if noise_frac is not None:
-        tree_kwargs["noise_frac"] = noise_frac
-    tree = build_toy_scenario_tree(N, **tree_kwargs)
+    if demand_source == "real":
+        if hub_correlation is not None or noise_frac is not None:
+            print("Note: hub_correlation/noise_frac are ignored with demand_source='real' "
+                  "-- both are derived from the real data instead.")
+        real_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season, seed=seed)
+        if season_drift is not None:
+            real_kwargs["season_drift"] = season_drift
+        if sibling_drift_correlation is not None:
+            real_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
+        tree, hub_meta = build_real_data_scenario_tree(n_hubs, data_dir=data_dir, **real_kwargs)
+        hub_list = ", ".join(f"{i}={hub_meta[i]['site']}" for i in hub_meta)
+        print(f"Using real hub data: {hub_list}")
+    else:
+        tree_kwargs = dict(seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
+                            hub_correlation=hub_correlation, seed=seed)
+        if season_drift is not None:
+            tree_kwargs["season_drift"] = season_drift
+        if sibling_drift_correlation is not None:
+            tree_kwargs["sibling_drift_correlation"] = sibling_drift_correlation
+        if noise_frac is not None:
+            tree_kwargs["noise_frac"] = noise_frac
+        tree = build_toy_scenario_tree(N, **tree_kwargs)
     tree.validate(N)
     n_leaves = branching ** len(seasons)
     total_weeks = len(seasons) * weeks_per_season
@@ -1709,8 +1737,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         import matplotlib
         matplotlib.use("Agg")
         from plots_tree_vs_two_stage import plot_all_comparisons
-        plot_all_comparisons(tree_model, mrp_model_for_plots, results, N, K, total_weeks, output_dir=plot_dir,
-                              skip_mrp_live_plots=(mrp_variant == "tree"))
+        plot_all_comparisons(tree_model, mrp_model_for_plots, results, N, K, total_weeks, output_dir=plot_dir)
 
         d_real, _, _ = build_full_horizon_scenarios(tree, N)
         save_flat_scenarios(d_real, leaf_prob, N, total_weeks,
@@ -1739,19 +1766,19 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
 if __name__ == "__main__":
 
-    hub_correlation = [
-    [ 1.0, -0.8,  0.0],
-    [-0.8,  1.0,  0.0],
-    [ 0.0,  0.0,  1.0],
-    ]
-    # hub_correlation= None
+    # hub_correlation = [
+    # [ 1.0, -0.8,  0.0],
+    # [-0.8,  1.0,  0.0],
+    # [ 0.0,  0.0,  1.0],
+    # ]
+    hub_correlation= None
     seed = None
     season_drift = (0.20,0.25)
     sibling_drift_correlation = 1
     noise_frac = 0.05
 
-    compare(seasons=(1, 2, 3, 4), weeks_per_season= 13, branching=2,
-            n_hubs=3, n_types=3, hub_correlation=hub_correlation,
+    compare(seasons=(1, 2, 3, 4), weeks_per_season= 5, branching=2,
+            n_hubs=2, n_types=3, hub_correlation=hub_correlation,
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
             make_plots=True, plot_dir="compare_plots", seed=seed, season_drift=season_drift,
             sibling_drift_correlation=sibling_drift_correlation,

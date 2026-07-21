@@ -1,0 +1,2 @@
+label,model,status,status_desc,obj,gap,solve_time_sec
+,mrp,2,OPTIMAL,250480.5,0.007877274232278764,1.1206321716308594

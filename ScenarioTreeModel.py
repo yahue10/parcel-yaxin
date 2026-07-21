@@ -118,10 +118,16 @@ class ScenarioTree:
 def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_season=13,
                              base_mean_range=(10000, 30000), season_drift=0.3,
                              noise_frac=0.02, hub_correlation=None,
-                             sibling_drift_correlation=1, seed=42):
+                             sibling_drift_correlation=1, seed=42, base_demand=None):
     """
     Demand per node is a random-walk perturbation of the parent's demand
     level; branching is uniform (equal child probabilities) at every stage.
+
+    base_demand : optional {hub: mean_weekly_demand} dict. When given,
+        overrides base_mean_range entirely -- each hub starts from its own
+        given mean level instead of a random draw from base_mean_range.
+        Must have an entry for every hub in N (e.g. real_hub_data.py's
+        build_real_data_scenario_tree passes real per-hub demand means here).
 
     hub_correlation : optional len(N) x len(N) correlation matrix (nested
         list/array, indexed by position in N, symmetric, unit diagonal).
@@ -162,6 +168,13 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
           uniformly from [low, high), using this function's own seeded RNG
           (so it's reproducible for a given seed, but varies season to
           season) — e.g. (0.1, 0.5).
+
+    noise_frac : float or {hub: scale} dict.
+        - float (default): the same within-season weekly-noise scale is
+          used for every hub, as before.
+        - dict {hub: scale}: a different scale per hub, e.g. each hub's own
+          coefficient of variation (std/mean) from real data. Must have an
+          entry for every hub in N.
     """
     rng = random.Random(seed)
     rng_np = np.random.default_rng(seed)
@@ -190,12 +203,13 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
         return chol @ rng_np.standard_normal(n)
 
     rho = sibling_drift_correlation
+    noise_frac_by_hub = noise_frac if isinstance(noise_frac, dict) else {i: noise_frac for i in N}
 
     e = {b: weeks_per_season for b in seasons}
     tree = ScenarioTree(e)
     root = tree.add_root()
 
-    base = {i: rng.uniform(*base_mean_range) for i in N}
+    base = dict(base_demand) if base_demand is not None else {i: rng.uniform(*base_mean_range) for i in N}
     frontier = [(root.id, base)]
     next_id = 1
 
@@ -217,7 +231,7 @@ def build_toy_scenario_tree(N, seasons=(1, 2, 3, 4), branching=2, weeks_per_seas
                 for t in range(1, weeks_per_season + 1):
                     z_noise = correlated_shocks()
                     for idx, i in enumerate(N):
-                        demand[i, t] = int(round(max(0.0, level[i] + noise_frac * level[i] * z_noise[idx])))
+                        demand[i, t] = int(round(max(0.0, level[i] + noise_frac_by_hub[i] * level[i] * z_noise[idx])))
                 tree.add_child(node_id, parent_id, stage=b, prob=child_prob, demand=demand)
                 new_frontier.append((node_id, level))
         frontier = new_frontier

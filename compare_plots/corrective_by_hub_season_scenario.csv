@@ -1,0 +1,513 @@
+model,hub,season,scenario,corrective_qty
+Multistage (tree),0,1,0,0.0
+Multistage (tree),0,1,1,0.0
+Multistage (tree),0,1,2,0.0
+Multistage (tree),0,1,3,0.0
+Multistage (tree),0,1,4,0.0
+Multistage (tree),0,1,5,0.0
+Multistage (tree),0,1,6,0.0
+Multistage (tree),0,1,7,0.0
+Multistage (tree),0,1,8,0.0
+Multistage (tree),0,1,9,0.0
+Multistage (tree),0,1,10,0.0
+Multistage (tree),0,1,11,0.0
+Multistage (tree),0,1,12,0.0
+Multistage (tree),0,1,13,0.0
+Multistage (tree),0,1,14,0.0
+Multistage (tree),0,1,15,0.0
+Multistage (tree),0,2,0,2.0
+Multistage (tree),0,2,1,2.0
+Multistage (tree),0,2,2,2.0
+Multistage (tree),0,2,3,2.0
+Multistage (tree),0,2,4,2.0
+Multistage (tree),0,2,5,2.0
+Multistage (tree),0,2,6,2.0
+Multistage (tree),0,2,7,2.0
+Multistage (tree),0,2,8,0.0
+Multistage (tree),0,2,9,0.0
+Multistage (tree),0,2,10,0.0
+Multistage (tree),0,2,11,0.0
+Multistage (tree),0,2,12,2.0
+Multistage (tree),0,2,13,2.0
+Multistage (tree),0,2,14,2.0
+Multistage (tree),0,2,15,2.0
+Multistage (tree),0,3,0,1.0
+Multistage (tree),0,3,1,1.0
+Multistage (tree),0,3,2,2.0
+Multistage (tree),0,3,3,2.0
+Multistage (tree),0,3,4,2.0
+Multistage (tree),0,3,5,2.0
+Multistage (tree),0,3,6,4.0
+Multistage (tree),0,3,7,4.0
+Multistage (tree),0,3,8,2.0
+Multistage (tree),0,3,9,2.0
+Multistage (tree),0,3,10,1.0
+Multistage (tree),0,3,11,1.0
+Multistage (tree),0,3,12,4.0
+Multistage (tree),0,3,13,4.0
+Multistage (tree),0,3,14,1.0
+Multistage (tree),0,3,15,1.0
+Multistage (tree),0,4,0,4.0
+Multistage (tree),0,4,1,0.0
+Multistage (tree),0,4,2,2.0
+Multistage (tree),0,4,3,3.0
+Multistage (tree),0,4,4,6.0
+Multistage (tree),0,4,5,3.0
+Multistage (tree),0,4,6,4.0
+Multistage (tree),0,4,7,5.0
+Multistage (tree),0,4,8,2.0
+Multistage (tree),0,4,9,1.0
+Multistage (tree),0,4,10,0.0
+Multistage (tree),0,4,11,0.0
+Multistage (tree),0,4,12,3.0
+Multistage (tree),0,4,13,0.0
+Multistage (tree),0,4,14,3.0
+Multistage (tree),0,4,15,4.0
+Multistage (tree),1,1,0,0.0
+Multistage (tree),1,1,1,0.0
+Multistage (tree),1,1,2,0.0
+Multistage (tree),1,1,3,0.0
+Multistage (tree),1,1,4,0.0
+Multistage (tree),1,1,5,0.0
+Multistage (tree),1,1,6,0.0
+Multistage (tree),1,1,7,0.0
+Multistage (tree),1,1,8,2.0
+Multistage (tree),1,1,9,2.0
+Multistage (tree),1,1,10,2.0
+Multistage (tree),1,1,11,2.0
+Multistage (tree),1,1,12,2.0
+Multistage (tree),1,1,13,2.0
+Multistage (tree),1,1,14,2.0
+Multistage (tree),1,1,15,2.0
+Multistage (tree),1,2,0,2.0
+Multistage (tree),1,2,1,2.0
+Multistage (tree),1,2,2,2.0
+Multistage (tree),1,2,3,2.0
+Multistage (tree),1,2,4,1.0
+Multistage (tree),1,2,5,1.0
+Multistage (tree),1,2,6,1.0
+Multistage (tree),1,2,7,1.0
+Multistage (tree),1,2,8,1.0
+Multistage (tree),1,2,9,1.0
+Multistage (tree),1,2,10,1.0
+Multistage (tree),1,2,11,1.0
+Multistage (tree),1,2,12,2.0
+Multistage (tree),1,2,13,2.0
+Multistage (tree),1,2,14,2.0
+Multistage (tree),1,2,15,2.0
+Multistage (tree),1,3,0,2.0
+Multistage (tree),1,3,1,2.0
+Multistage (tree),1,3,2,3.0
+Multistage (tree),1,3,3,3.0
+Multistage (tree),1,3,4,0.0
+Multistage (tree),1,3,5,0.0
+Multistage (tree),1,3,6,3.0
+Multistage (tree),1,3,7,3.0
+Multistage (tree),1,3,8,1.0
+Multistage (tree),1,3,9,1.0
+Multistage (tree),1,3,10,0.0
+Multistage (tree),1,3,11,0.0
+Multistage (tree),1,3,12,4.0
+Multistage (tree),1,3,13,4.0
+Multistage (tree),1,3,14,0.0
+Multistage (tree),1,3,15,0.0
+Multistage (tree),1,4,0,3.0
+Multistage (tree),1,4,1,4.0
+Multistage (tree),1,4,2,2.0
+Multistage (tree),1,4,3,6.0
+Multistage (tree),1,4,4,5.0
+Multistage (tree),1,4,5,0.0
+Multistage (tree),1,4,6,1.0
+Multistage (tree),1,4,7,2.0
+Multistage (tree),1,4,8,1.0
+Multistage (tree),1,4,9,3.0
+Multistage (tree),1,4,10,2.0
+Multistage (tree),1,4,11,2.0
+Multistage (tree),1,4,12,4.0
+Multistage (tree),1,4,13,2.0
+Multistage (tree),1,4,14,5.0
+Multistage (tree),1,4,15,1.0
+Static,0,1,0,0.0
+Static,0,1,1,0.0
+Static,0,1,2,0.0
+Static,0,1,3,0.0
+Static,0,1,4,0.0
+Static,0,1,5,0.0
+Static,0,1,6,0.0
+Static,0,1,7,0.0
+Static,0,1,8,0.0
+Static,0,1,9,0.0
+Static,0,1,10,0.0
+Static,0,1,11,0.0
+Static,0,1,12,0.0
+Static,0,1,13,0.0
+Static,0,1,14,0.0
+Static,0,1,15,0.0
+Static,0,2,0,0.0
+Static,0,2,1,0.0
+Static,0,2,2,0.0
+Static,0,2,3,0.0
+Static,0,2,4,0.0
+Static,0,2,5,0.0
+Static,0,2,6,0.0
+Static,0,2,7,0.0
+Static,0,2,8,0.0
+Static,0,2,9,0.0
+Static,0,2,10,0.0
+Static,0,2,11,0.0
+Static,0,2,12,0.0
+Static,0,2,13,0.0
+Static,0,2,14,0.0
+Static,0,2,15,0.0
+Static,0,3,0,0.0
+Static,0,3,1,0.0
+Static,0,3,2,0.0
+Static,0,3,3,0.0
+Static,0,3,4,0.0
+Static,0,3,5,0.0
+Static,0,3,6,0.0
+Static,0,3,7,0.0
+Static,0,3,8,0.0
+Static,0,3,9,0.0
+Static,0,3,10,0.0
+Static,0,3,11,0.0
+Static,0,3,12,0.0
+Static,0,3,13,0.0
+Static,0,3,14,0.0
+Static,0,3,15,0.0
+Static,0,4,0,0.0
+Static,0,4,1,0.0
+Static,0,4,2,0.0
+Static,0,4,3,0.0
+Static,0,4,4,0.0
+Static,0,4,5,0.0
+Static,0,4,6,0.0
+Static,0,4,7,0.0
+Static,0,4,8,0.0
+Static,0,4,9,0.0
+Static,0,4,10,0.0
+Static,0,4,11,0.0
+Static,0,4,12,0.0
+Static,0,4,13,0.0
+Static,0,4,14,0.0
+Static,0,4,15,0.0
+Static,1,1,0,0.0
+Static,1,1,1,0.0
+Static,1,1,2,0.0
+Static,1,1,3,0.0
+Static,1,1,4,0.0
+Static,1,1,5,0.0
+Static,1,1,6,0.0
+Static,1,1,7,0.0
+Static,1,1,8,0.0
+Static,1,1,9,0.0
+Static,1,1,10,0.0
+Static,1,1,11,0.0
+Static,1,1,12,0.0
+Static,1,1,13,0.0
+Static,1,1,14,0.0
+Static,1,1,15,0.0
+Static,1,2,0,0.0
+Static,1,2,1,0.0
+Static,1,2,2,0.0
+Static,1,2,3,0.0
+Static,1,2,4,0.0
+Static,1,2,5,0.0
+Static,1,2,6,0.0
+Static,1,2,7,0.0
+Static,1,2,8,0.0
+Static,1,2,9,0.0
+Static,1,2,10,0.0
+Static,1,2,11,0.0
+Static,1,2,12,0.0
+Static,1,2,13,0.0
+Static,1,2,14,0.0
+Static,1,2,15,0.0
+Static,1,3,0,0.0
+Static,1,3,1,0.0
+Static,1,3,2,0.0
+Static,1,3,3,0.0
+Static,1,3,4,0.0
+Static,1,3,5,0.0
+Static,1,3,6,0.0
+Static,1,3,7,0.0
+Static,1,3,8,0.0
+Static,1,3,9,0.0
+Static,1,3,10,0.0
+Static,1,3,11,0.0
+Static,1,3,12,0.0
+Static,1,3,13,0.0
+Static,1,3,14,0.0
+Static,1,3,15,0.0
+Static,1,4,0,0.0
+Static,1,4,1,0.0
+Static,1,4,2,0.0
+Static,1,4,3,0.0
+Static,1,4,4,0.0
+Static,1,4,5,0.0
+Static,1,4,6,0.0
+Static,1,4,7,0.0
+Static,1,4,8,0.0
+Static,1,4,9,0.0
+Static,1,4,10,0.0
+Static,1,4,11,0.0
+Static,1,4,12,0.0
+Static,1,4,13,0.0
+Static,1,4,14,0.0
+Static,1,4,15,0.0
+MNP,0,1,0,4.0
+MNP,0,1,1,4.0
+MNP,0,1,2,4.0
+MNP,0,1,3,4.0
+MNP,0,1,4,4.0
+MNP,0,1,5,4.0
+MNP,0,1,6,4.0
+MNP,0,1,7,4.0
+MNP,0,1,8,0.0
+MNP,0,1,9,0.0
+MNP,0,1,10,0.0
+MNP,0,1,11,0.0
+MNP,0,1,12,0.0
+MNP,0,1,13,0.0
+MNP,0,1,14,0.0
+MNP,0,1,15,0.0
+MNP,0,2,0,2.0
+MNP,0,2,1,2.0
+MNP,0,2,2,2.0
+MNP,0,2,3,2.0
+MNP,0,2,4,4.0
+MNP,0,2,5,4.0
+MNP,0,2,6,4.0
+MNP,0,2,7,4.0
+MNP,0,2,8,0.0
+MNP,0,2,9,0.0
+MNP,0,2,10,0.0
+MNP,0,2,11,0.0
+MNP,0,2,12,1.0
+MNP,0,2,13,1.0
+MNP,0,2,14,1.0
+MNP,0,2,15,1.0
+MNP,0,3,0,7.0
+MNP,0,3,1,7.0
+MNP,0,3,2,9.0
+MNP,0,3,3,9.0
+MNP,0,3,4,13.0
+MNP,0,3,5,13.0
+MNP,0,3,6,16.0
+MNP,0,3,7,16.0
+MNP,0,3,8,0.0
+MNP,0,3,9,0.0
+MNP,0,3,10,0.0
+MNP,0,3,11,0.0
+MNP,0,3,12,0.0
+MNP,0,3,13,0.0
+MNP,0,3,14,0.0
+MNP,0,3,15,0.0
+MNP,0,4,0,20.0
+MNP,0,4,1,24.0
+MNP,0,4,2,0.0
+MNP,0,4,3,2.0
+MNP,0,4,4,27.0
+MNP,0,4,5,31.0
+MNP,0,4,6,14.0
+MNP,0,4,7,12.0
+MNP,0,4,8,0.0
+MNP,0,4,9,0.0
+MNP,0,4,10,0.0
+MNP,0,4,11,0.0
+MNP,0,4,12,0.0
+MNP,0,4,13,0.0
+MNP,0,4,14,12.0
+MNP,0,4,15,10.0
+MNP,1,1,0,0.0
+MNP,1,1,1,0.0
+MNP,1,1,2,0.0
+MNP,1,1,3,0.0
+MNP,1,1,4,0.0
+MNP,1,1,5,0.0
+MNP,1,1,6,0.0
+MNP,1,1,7,0.0
+MNP,1,1,8,1.0
+MNP,1,1,9,1.0
+MNP,1,1,10,1.0
+MNP,1,1,11,1.0
+MNP,1,1,12,1.0
+MNP,1,1,13,1.0
+MNP,1,1,14,1.0
+MNP,1,1,15,1.0
+MNP,1,2,0,36.0
+MNP,1,2,1,36.0
+MNP,1,2,2,36.0
+MNP,1,2,3,36.0
+MNP,1,2,4,29.0
+MNP,1,2,5,29.0
+MNP,1,2,6,29.0
+MNP,1,2,7,29.0
+MNP,1,2,8,0.0
+MNP,1,2,9,0.0
+MNP,1,2,10,0.0
+MNP,1,2,11,0.0
+MNP,1,2,12,1.0
+MNP,1,2,13,1.0
+MNP,1,2,14,1.0
+MNP,1,2,15,1.0
+MNP,1,3,0,32.0
+MNP,1,3,1,32.0
+MNP,1,3,2,33.0
+MNP,1,3,3,33.0
+MNP,1,3,4,17.0
+MNP,1,3,5,17.0
+MNP,1,3,6,23.0
+MNP,1,3,7,23.0
+MNP,1,3,8,0.0
+MNP,1,3,9,0.0
+MNP,1,3,10,0.0
+MNP,1,3,11,0.0
+MNP,1,3,12,4.0
+MNP,1,3,13,4.0
+MNP,1,3,14,4.0
+MNP,1,3,15,4.0
+MNP,1,4,0,33.0
+MNP,1,4,1,33.0
+MNP,1,4,2,14.0
+MNP,1,4,3,17.0
+MNP,1,4,4,7.0
+MNP,1,4,5,9.0
+MNP,1,4,6,7.0
+MNP,1,4,7,8.0
+MNP,1,4,8,0.0
+MNP,1,4,9,0.0
+MNP,1,4,10,6.0
+MNP,1,4,11,4.0
+MNP,1,4,12,0.0
+MNP,1,4,13,0.0
+MNP,1,4,14,0.0
+MNP,1,4,15,0.0
+MRP,0,1,0,4.0
+MRP,0,1,1,4.0
+MRP,0,1,2,4.0
+MRP,0,1,3,4.0
+MRP,0,1,4,4.0
+MRP,0,1,5,4.0
+MRP,0,1,6,4.0
+MRP,0,1,7,4.0
+MRP,0,1,8,0.0
+MRP,0,1,9,0.0
+MRP,0,1,10,0.0
+MRP,0,1,11,0.0
+MRP,0,1,12,0.0
+MRP,0,1,13,0.0
+MRP,0,1,14,0.0
+MRP,0,1,15,0.0
+MRP,0,2,0,2.0
+MRP,0,2,1,2.0
+MRP,0,2,2,2.0
+MRP,0,2,3,2.0
+MRP,0,2,4,4.0
+MRP,0,2,5,4.0
+MRP,0,2,6,4.0
+MRP,0,2,7,4.0
+MRP,0,2,8,0.0
+MRP,0,2,9,0.0
+MRP,0,2,10,0.0
+MRP,0,2,11,0.0
+MRP,0,2,12,1.0
+MRP,0,2,13,1.0
+MRP,0,2,14,1.0
+MRP,0,2,15,1.0
+MRP,0,3,0,12.0
+MRP,0,3,1,12.0
+MRP,0,3,2,12.0
+MRP,0,3,3,12.0
+MRP,0,3,4,15.0
+MRP,0,3,5,15.0
+MRP,0,3,6,16.0
+MRP,0,3,7,16.0
+MRP,0,3,8,0.0
+MRP,0,3,9,0.0
+MRP,0,3,10,0.0
+MRP,0,3,11,0.0
+MRP,0,3,12,1.0
+MRP,0,3,13,1.0
+MRP,0,3,14,1.0
+MRP,0,3,15,1.0
+MRP,0,4,0,20.0
+MRP,0,4,1,24.0
+MRP,0,4,2,0.0
+MRP,0,4,3,2.0
+MRP,0,4,4,30.0
+MRP,0,4,5,31.0
+MRP,0,4,6,14.0
+MRP,0,4,7,12.0
+MRP,0,4,8,0.0
+MRP,0,4,9,0.0
+MRP,0,4,10,0.0
+MRP,0,4,11,0.0
+MRP,0,4,12,0.0
+MRP,0,4,13,0.0
+MRP,0,4,14,12.0
+MRP,0,4,15,10.0
+MRP,1,1,0,0.0
+MRP,1,1,1,0.0
+MRP,1,1,2,0.0
+MRP,1,1,3,0.0
+MRP,1,1,4,0.0
+MRP,1,1,5,0.0
+MRP,1,1,6,0.0
+MRP,1,1,7,0.0
+MRP,1,1,8,1.0
+MRP,1,1,9,1.0
+MRP,1,1,10,1.0
+MRP,1,1,11,1.0
+MRP,1,1,12,1.0
+MRP,1,1,13,1.0
+MRP,1,1,14,1.0
+MRP,1,1,15,1.0
+MRP,1,2,0,36.0
+MRP,1,2,1,36.0
+MRP,1,2,2,36.0
+MRP,1,2,3,36.0
+MRP,1,2,4,29.0
+MRP,1,2,5,29.0
+MRP,1,2,6,29.0
+MRP,1,2,7,29.0
+MRP,1,2,8,0.0
+MRP,1,2,9,0.0
+MRP,1,2,10,0.0
+MRP,1,2,11,0.0
+MRP,1,2,12,1.0
+MRP,1,2,13,1.0
+MRP,1,2,14,1.0
+MRP,1,2,15,1.0
+MRP,1,3,0,29.0
+MRP,1,3,1,29.0
+MRP,1,3,2,25.0
+MRP,1,3,3,25.0
+MRP,1,3,4,16.0
+MRP,1,3,5,16.0
+MRP,1,3,6,18.0
+MRP,1,3,7,18.0
+MRP,1,3,8,0.0
+MRP,1,3,9,0.0
+MRP,1,3,10,0.0
+MRP,1,3,11,0.0
+MRP,1,3,12,1.0
+MRP,1,3,13,1.0
+MRP,1,3,14,0.0
+MRP,1,3,15,0.0
+MRP,1,4,0,30.0
+MRP,1,4,1,33.0
+MRP,1,4,2,14.0
+MRP,1,4,3,17.0
+MRP,1,4,4,7.0
+MRP,1,4,5,9.0
+MRP,1,4,6,7.0
+MRP,1,4,7,8.0
+MRP,1,4,8,0.0
+MRP,1,4,9,0.0
+MRP,1,4,10,6.0
+MRP,1,4,11,4.0
+MRP,1,4,12,0.0
+MRP,1,4,13,0.0
+MRP,1,4,14,0.0
+MRP,1,4,15,0.0
