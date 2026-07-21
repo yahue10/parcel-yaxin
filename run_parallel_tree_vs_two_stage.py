@@ -33,6 +33,7 @@ You can configure:
 
 
 import os
+import sys
 import time
 import json
 import pickle
@@ -345,8 +346,10 @@ def main():
 
     all_results = []
     start_all = time.time()
+    interrupted = False
 
-    with ProcessPoolExecutor(max_workers=MAX_WORKERS) as executor:
+    executor = ProcessPoolExecutor(max_workers=MAX_WORKERS)
+    try:
         future_to_label = {
             executor.submit(solve_instance, cfg): cfg["label"]
             for cfg in INSTANCES
@@ -361,6 +364,34 @@ def main():
                 print(f"[{label}] FAILED with exception:")
                 traceback.print_exception(type(exc), exc, exc.__traceback__)
                 all_results.append({"label": label, "error": str(exc)})
+    except KeyboardInterrupt:
+        # Gurobi installs its own SIGINT handler while optimize() is running,
+        # so a single Ctrl+C typically only stops whichever solve is active
+        # in each worker at that instant (as an early "interrupted" status)
+        # -- the surrounding Python code then just carries on to the next
+        # solve/instance, which is why it looked like only some experiments
+        # stopped. Force-killing every worker process with SIGTERM instead
+        # bypasses Gurobi's handler entirely (it only customizes SIGINT) and
+        # kills the whole process outright, including its background tree
+        # thread, rather than waiting for ProcessPoolExecutor's default
+        # graceful shutdown (which would otherwise block here until every
+        # busy worker finishes on its own).
+        interrupted = True
+        procs = list(executor._processes.values())
+        print(f"\nInterrupted -- terminating {len(procs)} running worker process(es) now "
+              "(not waiting for in-progress solves to finish)...")
+        for p in procs:
+            p.terminate()
+        for p in procs:
+            p.join(timeout=5)
+            if p.is_alive():
+                p.kill()
+                p.join()
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    if interrupted:
+        print(f"Stopped after {len(all_results)}/{len(INSTANCES)} instance(s) completed.")
 
     total_time = time.time() - start_all
 
@@ -391,6 +422,9 @@ def main():
     with open(summary_path, "wb") as f:
         pickle.dump(all_results, f)
     print(f"\nCombined results saved to {summary_path}")
+
+    if interrupted:
+        sys.exit(1)
 
 
 if __name__ == "__main__":
