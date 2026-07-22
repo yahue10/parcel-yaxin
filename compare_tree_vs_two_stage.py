@@ -1578,13 +1578,22 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
             hub_correlation=None, season_drift=None, sibling_drift_correlation=None,
             noise_frac=None, make_plots=False, plot_dir="compare_plots", mrp_variant="flat",
-            demand_source="synthetic", data_dir="data"):
+            demand_source="synthetic", data_dir="data",
+            tree_solver_params=None, mrp_solver_params=None):
     """
     seed : int or None. An int (the default, 42) reproduces the exact same
         instance every call — same demand tree, same everything. Pass
         seed=None to get a fresh, genuinely random instance each call (drawn
         from OS entropy); the actual seed used is printed so you can pass it
         back in later to reproduce that specific run.
+
+    tree_solver_params, mrp_solver_params : optional dicts merged ON TOP of
+        solver_params for just that one model's solve (e.g. mrp_solver_params=
+        {"MIPGap": 0.05} to give MRP a looser gap than the tree/static/MNP
+        share, since MRP's flattened scenario set is typically a much harder
+        MIP to close to a tight gap -- see the tree-vs-MRP solve-log
+        discussion this was added for). Static/MNP always use solver_params
+        unmodified.
 
     season_drift, sibling_drift_correlation, noise_frac : passed straight
         through to build_toy_scenario_tree — see its docstring in
@@ -1677,8 +1686,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
     def _solve_tree_model():
         t0 = time.time()
-        tree_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "tree.log"))
-                       if make_plots else solver_params)
+        tree_base_params = {**solver_params, **(tree_solver_params or {})}
+        tree_params = (_params_with_log_file(tree_base_params, os.path.join(plot_dir, "gurobi_log", "tree.log"))
+                       if make_plots else tree_base_params)
         tree_model.solve(params=tree_params)
         if make_plots:
             save_all_variables(tree_model, os.path.join(plot_dir, "variables", "tree.pkl"))
@@ -1725,8 +1735,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
     print(f"MRP ({mrp_variant})...")
     t0 = time.time()
-    mrp_params = (_params_with_log_file(solver_params, os.path.join(plot_dir, "gurobi_log", "mrp.log"))
-                  if make_plots else solver_params)
+    mrp_base_params = {**solver_params, **(mrp_solver_params or {})}
+    mrp_params = (_params_with_log_file(mrp_base_params, os.path.join(plot_dir, "gurobi_log", "mrp.log"))
+                  if make_plots else mrp_base_params)
     if mrp_variant == "tree":
         mrp_tree_model = build_mrp_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
         mrp_tree_model.solve(params=mrp_params, s_first_stage=True)

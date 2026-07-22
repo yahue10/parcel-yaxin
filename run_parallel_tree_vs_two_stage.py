@@ -50,7 +50,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 144000,
+    "TimeLimit": 18000,
     "MIPGap": 0.05,
     "Threads": 32,
     "Presolve": 2,
@@ -92,6 +92,12 @@ MAX_WORKERS = 6
 # apply; hub_correlation/noise_frac are ignored with "real" (both come from
 # the data instead). Optional "data_dir" key overrides the "data" folder
 # path (only relevant with demand_source="real").
+# Optional "tree_solver_params"/"mrp_solver_params" keys: dicts merged ON TOP
+# of SOLVER_PARAMS for just that one model's solve, e.g. "mrp_solver_params":
+# {"MIPGap": 0.05} to give MRP a looser gap than the tree/static/MNP share --
+# MRP's flattened scenario set is typically a much harder MIP to close to a
+# tight gap than the tree model at the same instance size. Static/MNP always
+# use SOLVER_PARAMS unmodified.
 INSTANCES = [
     # demand_source="real" derives base demand, inter-hub correlation, and
     # per-hub noise scale from data/negative_pairs_overlap20_within80km_first20hubs*.csv
@@ -100,10 +106,11 @@ INSTANCES = [
     # season_drift/sibling_drift_correlation still apply on top of the real
     # base level. n_hubs picks the first N hubs listed in the data (capped
     # at 20).
-    {"label": "hub16_real_branch2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 16, "n_types": 3, "seed": 40,
+    {"label": "hub10_real_branch2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 40,
      "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
-     "demand_source": "real", "mrp_variant": "tree"},
+     "demand_source": "real", "mrp_variant": "tree",
+     "mrp_solver_params": {"MIPGap": 0.05}},
 
 ]
 
@@ -170,6 +177,8 @@ def solve_instance(instance_cfg):
     if demand_source not in ("synthetic", "real"):
         raise ValueError(f"[{label}] demand_source must be 'synthetic' or 'real', got {demand_source!r}")
     data_dir = instance_cfg.get("data_dir", "data")
+    tree_solver_params = instance_cfg.get("tree_solver_params")
+    mrp_solver_params = instance_cfg.get("mrp_solver_params")
     N = list(range(instance_cfg["n_hubs"]))
     K = list(range(instance_cfg["n_types"]))
 
@@ -242,7 +251,8 @@ def solve_instance(instance_cfg):
 
     def _solve_tree_model():
         t0 = time.time()
-        tree_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "tree.log"))
+        tree_base_params = {**SOLVER_PARAMS, **(tree_solver_params or {})}
+        tree_params = _params_with_log_file(tree_base_params, os.path.join(exp_dir, "gurobi_log", "tree.log"))
         tree_model.solve(params=tree_params, options=GUROBI_OPTIONS, label=f"{label}:tree")
         save_all_variables(tree_model, os.path.join(exp_dir, "variables", "tree.pkl"), label=label)
         return time.time() - t0
@@ -285,7 +295,8 @@ def solve_instance(instance_cfg):
     print(f"[{label}] MNP done in {t_mnp:.1f}s obj={mnp_result['obj']}")
 
     t0 = time.time()
-    mrp_params = _params_with_log_file(SOLVER_PARAMS, os.path.join(exp_dir, "gurobi_log", "mrp.log"))
+    mrp_base_params = {**SOLVER_PARAMS, **(mrp_solver_params or {})}
+    mrp_params = _params_with_log_file(mrp_base_params, os.path.join(exp_dir, "gurobi_log", "mrp.log"))
     if mrp_variant == "tree":
         mrp_tree_model = build_mrp_tree_model(N, K, tree, seed=seed, cost_overrides=cost_overrides)
         mrp_tree_model.solve(params=mrp_params, options=GUROBI_OPTIONS, label=f"{label}:mrp", s_first_stage=True)
