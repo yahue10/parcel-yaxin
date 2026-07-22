@@ -103,7 +103,7 @@ INSTANCES = [
     {"label": "hub16_real_branch2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
      "branching": 2, "n_hubs": 16, "n_types": 3, "seed": 40,
      "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
-     "demand_source": "real"},
+     "demand_source": "real", "mrp_variant": "tree"},
 
 ]
 
