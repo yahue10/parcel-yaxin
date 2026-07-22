@@ -3,23 +3,22 @@ real_hub_data.py — Calibrates demand-scenario generation to real hub data
 ==========================================================================
 
 Loads real per-hub weekly-demand mean/std, location, and pairwise
-correlation from data/negative_pairs_overlap20_within80km_first20hubs*.csv,
-and builds a scenario tree from it via ScenarioTreeModel.build_toy_scenario_tree
--- real base demand, real (repaired) inter-hub correlation, and real
-per-hub weekly-noise scale substituted in, while the season-drift mechanism,
-sibling_drift_correlation, and tree structure are all unchanged.
+correlation from true_data/TRUE_negative_pairs_SOLID_*.csv (21 hubs, the
+corrected/"solid list" dataset), and builds a scenario tree from it via
+ScenarioTreeModel.build_toy_scenario_tree -- real base demand, real
+inter-hub correlation, and real per-hub weekly-noise scale substituted in,
+while the season-drift mechanism, sibling_drift_correlation, and tree
+structure are all unchanged.
 
-The real correlation matrix (both the full 20x20 and any subset checked
-down to 3 hubs) is NOT a valid correlation matrix on its own -- its minimum
-eigenvalue is negative (~-1.89 for the full matrix), almost certainly
-because n_weeks_observed varies hugely per hub (96 to 567 weeks), so
-pairwise correlations were computed on inconsistent, only-partially
--overlapping observation windows. Each pairwise number can be individually
-plausible while the full set is mutually inconsistent (some implied
-combination of hub demands would need negative variance, which is
-impossible). np.linalg.cholesky() -- used directly by build_toy_scenario_tree
--- would raise on this data as-is, so it's repaired once via eigenvalue
-clipping before use (see _nearest_psd_correlation).
+The correlation matrix in this dataset is already PSD (its filename says
+"PSD_FIXED", and this is verified directly: min eigenvalue ~1e-6, i.e. valid
+to within numerical noise) -- unlike an earlier version of this data, whose
+matrix was NOT a valid correlation matrix on its own (negative minimum
+eigenvalue, almost certainly from wildly inconsistent n_weeks_observed per
+hub producing pairwise correlations computed on non-overlapping windows).
+_nearest_psd_correlation is still applied unconditionally below as a safety
+net -- it's a near-identity transform on already-valid input, so this stays
+correct (and cheap) even if a future data drop isn't pre-repaired.
 """
 
 import csv
@@ -31,9 +30,9 @@ import pandas as pd
 
 from ScenarioTreeModel import build_toy_scenario_tree
 
-DEFAULT_DATA_DIR = "data"
-DEFAULT_INFO_CSV = "negative_pairs_overlap20_within80km_first20hubs.csv"
-DEFAULT_CORR_CSV = "negative_pairs_overlap20_within80km_first20hubs_corr_matrix.csv"
+DEFAULT_DATA_DIR = "true_data"
+DEFAULT_INFO_CSV = "TRUE_negative_pairs_SOLID_hubs.csv"
+DEFAULT_CORR_CSV = "TRUE_negative_pairs_SOLID_corr_matrix_PSD_FIXED.csv"
 
 # Distance-based rebalancing/transfer cost (alpha) -- see build_distance_based_alpha.
 # Bikes: flat EUR/km, capped. Vans: (fuel/energy price per km + driver cost per

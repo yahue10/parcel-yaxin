@@ -50,7 +50,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 18000,
+    "TimeLimit": 108000,
     "MIPGap": 0.05,
     "Threads": 32,
     "Presolve": 2,
@@ -85,12 +85,12 @@ MAX_WORKERS = 6
 # Optional "demand_source" key: "synthetic" (default) builds demand via
 # ScenarioTreeModel.build_toy_scenario_tree (random base level per hub).
 # "real" instead builds it via real_hub_data.build_real_data_scenario_tree --
-# real per-hub mean demand, real (repaired) inter-hub correlation, and real
-# per-hub weekly-noise scale, using the first n_hubs hubs listed in
-# data/negative_pairs_overlap20_within80km_first20hubs*.csv (capped at 20 --
-# that's all the data covers). season_drift/sibling_drift_correlation still
-# apply; hub_correlation/noise_frac are ignored with "real" (both come from
-# the data instead). Optional "data_dir" key overrides the "data" folder
+# real per-hub mean demand, real inter-hub correlation, and real per-hub
+# weekly-noise scale, using the first n_hubs hubs listed in
+# true_data/TRUE_negative_pairs_SOLID_*.csv (capped at 21 -- that's all the
+# data covers). season_drift/sibling_drift_correlation still apply;
+# hub_correlation/noise_frac are ignored with "real" (both come from the
+# data instead). Optional "data_dir" key overrides the "true_data" folder
 # path (only relevant with demand_source="real").
 # Optional "tree_solver_params"/"mrp_solver_params" keys: dicts merged ON TOP
 # of SOLVER_PARAMS for just that one model's solve, e.g. "mrp_solver_params":
@@ -100,19 +100,20 @@ MAX_WORKERS = 6
 # use SOLVER_PARAMS unmodified.
 INSTANCES = [
     # demand_source="real" derives base demand, inter-hub correlation, and
-    # per-hub noise scale from data/negative_pairs_overlap20_within80km_first20hubs*.csv
-    # -- no more hand-picked hub_correlation matrix or noise_frac needed
+    # per-hub noise scale from true_data/TRUE_negative_pairs_SOLID_*.csv --
+    # no more hand-picked hub_correlation matrix or noise_frac needed
     # (both are ignored if given, since real data provides them instead).
     # season_drift/sibling_drift_correlation still apply on top of the real
     # base level. n_hubs picks the first N hubs listed in the data (capped
-    # at 20).
-    {"label": "hub10_real_branch2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 10, "n_types": 3, "seed": 40,
+    # at 21).
+    {"label": "hub16_real_branch2_seed55", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 16, "n_types": 3, "seed": 55,
      "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
      "demand_source": "real", "mrp_variant": "tree",
      "mrp_solver_params": {"MIPGap": 0.05}},
 
 ]
+
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +177,7 @@ def solve_instance(instance_cfg):
     demand_source = instance_cfg.get("demand_source", "synthetic")
     if demand_source not in ("synthetic", "real"):
         raise ValueError(f"[{label}] demand_source must be 'synthetic' or 'real', got {demand_source!r}")
-    data_dir = instance_cfg.get("data_dir", "data")
+    data_dir = instance_cfg.get("data_dir", "true_data")
     tree_solver_params = instance_cfg.get("tree_solver_params")
     mrp_solver_params = instance_cfg.get("mrp_solver_params")
     N = list(range(instance_cfg["n_hubs"]))

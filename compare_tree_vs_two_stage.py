@@ -1578,7 +1578,7 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
             n_hubs=3, n_types=3, solver_params=None, seed=42, cost_overrides=None,
             hub_correlation=None, season_drift=None, sibling_drift_correlation=None,
             noise_frac=None, make_plots=False, plot_dir="compare_plots", mrp_variant="flat",
-            demand_source="synthetic", data_dir="data",
+            demand_source="synthetic", data_dir="true_data",
             tree_solver_params=None, mrp_solver_params=None):
     """
     seed : int or None. An int (the default, 42) reproduces the exact same
@@ -1615,10 +1615,9 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
         ScenarioTreeModel.build_toy_scenario_tree (random base level per
         hub). "real" instead builds it via
         real_hub_data.build_real_data_scenario_tree -- real per-hub mean
-        demand, real (repaired) inter-hub correlation, and real per-hub
-        weekly-noise scale, from data_dir's
-        negative_pairs_overlap20_within80km_first20hubs*.csv, using the
-        first n_hubs hubs listed there (capped at 20 -- that's all the data
+        demand, real inter-hub correlation, and real per-hub weekly-noise
+        scale, from data_dir's TRUE_negative_pairs_SOLID_*.csv, using the
+        first n_hubs hubs listed there (capped at 21 -- that's all the data
         covers). The season_drift/sibling_drift_correlation mechanism is
         unchanged either way. hub_correlation/noise_frac are ignored (with
         a printed note if explicitly set) when demand_source="real", since

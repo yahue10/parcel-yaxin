@@ -2,7 +2,12 @@
   "permissions": {
     "allow": [
       "Bash(python -c \"import ast; ast.parse\\(open\\('run_parallel_tree_vs_two_stage.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
-      "Bash(PYTHONPATH=\"/Users/pang/Documents/La poste/parcel-yaxin\" timeout 180 python /private/tmp/claude-1752071464/-Users-pang-Documents-La-poste-parcel-yaxin/cb3fa2b2-a1a0-4c86-b404-8f2645dbcb49/scratchpad/parallel_tree_check.py)"
+      "Bash(PYTHONPATH=\"/Users/pang/Documents/La poste/parcel-yaxin\" timeout 180 python /private/tmp/claude-1752071464/-Users-pang-Documents-La-poste-parcel-yaxin/cb3fa2b2-a1a0-4c86-b404-8f2645dbcb49/scratchpad/parallel_tree_check.py)",
+      "Bash(command -v node)",
+      "Bash(command -v nodejs)",
+      "Bash(command -v deno)",
+      "Bash(command -v qjs)",
+      "Bash(python3 -c \"import py_mini_racer\")"
     ]
   }
 }
