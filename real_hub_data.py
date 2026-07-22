@@ -31,7 +31,11 @@ import pandas as pd
 from ScenarioTreeModel import build_toy_scenario_tree
 
 DEFAULT_DATA_DIR = "true_data"
-DEFAULT_INFO_CSV = "TRUE_negative_pairs_SOLID_hubs.csv"
+# Demand-floored variant: identical to TRUE_negative_pairs_SOLID_hubs.csv
+# except the 4 hubs with mean_weekly_demand < 10000 are raised to 10500
+# (std_weekly_demand scaled proportionally, so cv/relative noisiness is
+# unchanged) -- see true_data/TRUE_negative_pairs_SOLID_hubs_demand_floor10000.csv.
+DEFAULT_INFO_CSV = "TRUE_negative_pairs_SOLID_hubs_demand_floor10000.csv"
 DEFAULT_CORR_CSV = "TRUE_negative_pairs_SOLID_corr_matrix_PSD_FIXED.csv"
 
 # Distance-based rebalancing/transfer cost (alpha) -- see build_distance_based_alpha.
