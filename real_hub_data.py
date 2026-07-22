@@ -108,6 +108,21 @@ def load_hub_data(n_hubs, data_dir=DEFAULT_DATA_DIR, info_csv=DEFAULT_INFO_CSV, 
     return base_demand, corr_matrix, cv_by_hub, hub_meta
 
 
+# Cap on real per-hub cv (std/mean) when it's used as the WITHIN-SEASON
+# weekly noise scale (see build_real_data_scenario_tree). Real cv is
+# computed from up to ~592 weeks (~11 years) of historical data, so it
+# already reflects season-to-season and year-to-year variation -- variation
+# build_toy_scenario_tree's season_drift mechanism ALSO models separately.
+# Feeding the full, uncapped cv in again as pure independent per-week
+# Gaussian noise double-counts that variance: empirically, hubs with real
+# cv > ~0.5 then hit exact 0 demand 5-19% of weeks and dip below 30% of
+# their real mean 15-46% of weeks -- clearly not "real" week-to-week
+# behavior. Capping at 0.30 (verified against this dataset: every hub's
+# zero-demand rate drops to 0.00%) removes that pathology while still using
+# each hub's own real cv, uncapped, whenever it's already below the cap.
+MAX_WEEKLY_NOISE_CV = 0.30
+
+
 def build_real_data_scenario_tree(n_hubs, seasons=(1, 2, 3, 4), branching=2, weeks_per_season=13,
                                    season_drift=0.3, sibling_drift_correlation=1, seed=42,
                                    data_dir=DEFAULT_DATA_DIR):
@@ -116,7 +131,11 @@ def build_real_data_scenario_tree(n_hubs, seasons=(1, 2, 3, 4), branching=2, wee
     base demand / real (repaired) correlation / real per-hub coefficient of
     variation substituted in -- season_drift mechanism,
     sibling_drift_correlation, and tree structure are all UNCHANGED from
-    the synthetic generator.
+    the synthetic generator. The cv actually used as weekly noise is capped
+    at MAX_WEEKLY_NOISE_CV (see its docstring) to avoid double-counting
+    season-to-season variance as pure weekly noise -- the RETURNED cv_by_hub
+    is the true, uncapped real value throughout (so save_hub_data_used still
+    records the real std/cv, not the dampened one used internally here).
 
     Returns (tree, base_demand, corr_matrix, cv_by_hub, hub_meta) -- the
     same four values load_hub_data returns, passed through so callers can
@@ -127,9 +146,10 @@ def build_real_data_scenario_tree(n_hubs, seasons=(1, 2, 3, 4), branching=2, wee
     """
     N = list(range(n_hubs))
     base_demand, corr_matrix, cv_by_hub, hub_meta = load_hub_data(n_hubs, data_dir=data_dir)
+    weekly_noise_cv = {i: min(cv, MAX_WEEKLY_NOISE_CV) for i, cv in cv_by_hub.items()}
     tree = build_toy_scenario_tree(
         N, seasons=seasons, branching=branching, weeks_per_season=weeks_per_season,
-        base_demand=base_demand, hub_correlation=corr_matrix, noise_frac=cv_by_hub,
+        base_demand=base_demand, hub_correlation=corr_matrix, noise_frac=weekly_noise_cv,
         season_drift=season_drift, sibling_drift_correlation=sibling_drift_correlation, seed=seed,
     )
     return tree, base_demand, corr_matrix, cv_by_hub, hub_meta
