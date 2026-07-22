@@ -50,8 +50,8 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 2592000,
-    "MIPGap": 0.01,
+    "TimeLimit": 144000,
+    "MIPGap": 0.05,
     "Threads": 32,
     "Presolve": 2,
 }
@@ -100,16 +100,8 @@ INSTANCES = [
     # season_drift/sibling_drift_correlation still apply on top of the real
     # base level. n_hubs picks the first N hubs listed in the data (capped
     # at 20).
-    {"label": "hub16_real_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 3, "n_hubs": 16, "n_types": 3, "seed": 40,
-     "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
-     "demand_source": "real"},
-
-    # Same n_hubs=6 shape twice, differentiated by seed (different
-    # season-drift/weekly-noise draws) instead of noise_frac/hub_correlation
-    # -- those aren't independent knobs anymore under demand_source="real".
-    {"label": "hub16_real_seed43", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 4, "n_hubs": 16, "n_types": 3, "seed": 43,
+    {"label": "hub16_real_branch2_seed40", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 16, "n_types": 3, "seed": 40,
      "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
      "demand_source": "real"},
 

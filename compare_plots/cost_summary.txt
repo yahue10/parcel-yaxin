@@ -1,0 +1,81 @@
+Multistage (Tree) vs Static vs MNP vs MRP — Cost Summary
+==========================================================
+
+Multistage (tree)   : 864,533.38
+Static              : 1,494,098.00
+MNP                 : 945,489.12
+MRP                 : 903,203.50
+
+VMS vs Static         : 629,564.62 (+72.82%)
+VMS vs MNP            : 80,955.75 (+9.36%)
+VMS vs MRP            : 38,670.12 (+4.47%)
+
+Component                  Multistage (tree)            Static               MNP               MRP
+Purchase                          221,298.00        221,298.00        221,298.00        251,298.00
+Planned subcontracting            619,062.50      1,272,800.00        537,440.00        549,160.00
+Redeployment                           97.50              0.00              0.00              0.00
+Corrective subcontracting          23,533.50              0.00        186,751.12        102,057.38
+Rebalancing                           541.88              0.00              0.00            688.12
+
+
+Per-scenario cost breakdown (realized, not expected)
+==========================================================
+
+Planned subcontracting:
+  Model                         mean           std           min           max
+  Multistage (tree)       619,062.50     87,115.23    508,840.00    771,520.00
+  Static                1,272,800.00          0.00  1,272,800.00  1,272,800.00
+  MNP                     537,440.00          0.00    537,440.00    537,440.00
+  MRP                     549,160.00          0.00    549,160.00    549,160.00
+
+Redeployment:
+  Model                         mean           std           min           max
+  Multistage (tree)            97.50         19.84         70.00        130.00
+  Static                        0.00          0.00          0.00          0.00
+  MNP                           0.00          0.00          0.00          0.00
+  MRP                           0.00          0.00          0.00          0.00
+
+Corrective subcontracting:
+  Model                         mean           std           min           max
+  Multistage (tree)        23,533.50      3,311.00     19,386.00     31,920.00
+  Static                        0.00          0.00          0.00          0.00
+  MNP                     186,751.12    117,449.53     90,426.00    413,310.00
+  MRP                     102,057.38    107,671.41     11,142.00    305,070.00
+
+Rebalancing:
+  Model                         mean           std           min           max
+  Multistage (tree)           541.88         57.79        440.00        690.00
+  Static                        0.00          0.00          0.00          0.00
+  MNP                           0.00          0.00          0.00          0.00
+  MRP                         688.12        200.10        390.00      1,000.00
+
+Per-scenario resource cost by model (scenario-varying components only)
+==============================================================================
+                           Multistage (tree)                       MNP                MRP            
+         o      planned     redeploy   corrective    rebalance   corrective   corrective    rebalance
+         0      570,080          100       25,674          480       91,428       24,084          610
+         1      578,080          100       20,280          550       94,668       28,980          670
+         2      567,760          110       22,830          530       90,426       17,640          920
+         3      567,760          110       22,380          530       91,572       17,640          790
+         4      512,160          130       20,184          440      101,202       11,142          390
+         5      508,840          130       21,480          490       95,910       11,142          390
+         6      532,480          120       19,932          540      110,844       11,592          410
+         7      531,480          120       19,386          530      110,598       12,942          400
+         8      637,040           80       22,386          690      178,284      103,638          670
+         9      634,360           80       23,934          510      174,342      100,794          680
+        10      629,040           90       22,134          530      160,050       89,766          840
+        11      624,720           90       26,328          540      161,346       90,708          660
+        12      771,520           80       28,824          610      412,452      303,816          910
+        13      767,200           80       31,920          630      413,310      305,070          740
+        14      736,240           70       25,332          550      351,684      252,762        1,000
+        15      736,240           70       23,532          520      349,902      251,202          930
+  Expected      619,062           98       23,534          542      186,751      102,057          688
+
+
+Green vehicle coverage check (coverage vs theta * demand)
+==========================================================
+Model                 violations   min ratio  mean ratio   max ratio
+Multistage (tree)              0       1.000       1.301       1.989
+Static                         0       1.013       1.942       6.820
+MNP                            0       1.005       1.306       2.654
+MRP                            0       1.001       1.300       2.424

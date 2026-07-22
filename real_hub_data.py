@@ -36,15 +36,14 @@ DEFAULT_INFO_CSV = "negative_pairs_overlap20_within80km_first20hubs.csv"
 DEFAULT_CORR_CSV = "negative_pairs_overlap20_within80km_first20hubs_corr_matrix.csv"
 
 # Distance-based rebalancing/transfer cost (alpha) -- see build_distance_based_alpha.
-# Bikes: flat EUR/km. Vans: (fuel/energy price per km + driver wage/speed) EUR/km,
-# one-way. Distance = haversine(hub_i, hub_j) * ROAD_DISTANCE_FACTOR (straight
-# -line routes are optimistic vs. real road travel).
+# Bikes: flat EUR/km, capped. Vans: (fuel/energy price per km + driver cost per
+# km) EUR/km, one-way. Distance = haversine(hub_i, hub_j) * ROAD_DISTANCE_FACTOR
+# (straight-line routes are optimistic vs. real road travel).
 ROAD_DISTANCE_FACTOR = 1.3
-DRIVER_HOURLY_WAGE_EUR = 20.0
-AVERAGE_SPEED_KMH = 80.0
-FUEL_PRICE_PER_KM_EUR = {1: 0.05, 2: 0.16}   # e-van, d-van
-BIKE_RATE_PER_KM_EUR = 1.0
-BIKE_MAX_COST_EUR = 80.0  # cap: beyond this distance a bike transfer wouldn't actually be used
+FUEL_PRICE_PER_KM_EUR = {1: 0.05, 2: 0.16}    # e-van, d-van
+DRIVER_COST_PER_KM_EUR = {1: 0.30, 2: 0.25}   # e-van, d-van (d-van = 20 EUR/h wage / 80 km/h speed)
+BIKE_RATE_PER_KM_EUR = 0.5
+BIKE_MAX_COST_EUR = 40.0  # cap: beyond this distance a bike transfer wouldn't actually be used
 
 
 def _nearest_psd_correlation(corr, epsilon=1e-6):
@@ -145,11 +144,10 @@ def _haversine_km(lat1, lng1, lat2, lng2):
 def build_distance_based_alpha(hub_meta, N, K):
     """alpha[i,j,k] from real hub locations (see load_hub_data's hub_meta):
     bikes (k=0) BIKE_RATE_PER_KM_EUR flat, capped at BIKE_MAX_COST_EUR; vans
-    (k=1,2) (fuel/energy price + driver wage/speed) EUR/km, one-way, uncapped.
+    (k=1,2) (fuel/energy price + driver cost) EUR/km, one-way, uncapped.
     Distance = haversine * ROAD_DISTANCE_FACTOR. Covers the full N x N x K
     grid (including i==j, distance 0 -> alpha 0), matching build_cost_params'
     existing alpha shape."""
-    driver_cost_per_km = DRIVER_HOURLY_WAGE_EUR / AVERAGE_SPEED_KMH
     alpha = {}
     for i in N:
         for j in N:
@@ -157,7 +155,7 @@ def build_distance_based_alpha(hub_meta, N, K):
                                hub_meta[j]["lat"], hub_meta[j]["lng"]) * ROAD_DISTANCE_FACTOR
             alpha[i, j, 0] = min(BIKE_RATE_PER_KM_EUR * d, BIKE_MAX_COST_EUR)
             for k in (1, 2):
-                alpha[i, j, k] = (FUEL_PRICE_PER_KM_EUR[k] + driver_cost_per_km) * d
+                alpha[i, j, k] = (FUEL_PRICE_PER_KM_EUR[k] + DRIVER_COST_PER_KM_EUR[k]) * d
     return alpha
 
 

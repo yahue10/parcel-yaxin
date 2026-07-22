@@ -1809,19 +1809,19 @@ def compare(seasons=(1, 2, 3, 4), weeks_per_season=13, branching=2,
 
 if __name__ == "__main__":
 
-    # hub_correlation = [
-    # [ 1.0, -0.8,  0.0],
-    # [-0.8,  1.0,  0.0],
-    # [ 0.0,  0.0,  1.0],
-    # ]
-    hub_correlation= None
+    hub_correlation = [
+    [ 1.0, -0.8,  0.0],
+    [-0.8,  1.0,  0.0],
+    [ 0.0,  0.0,  1.0],
+    ]
+    # hub_correlation= None
     seed = None
     season_drift = (0.20,0.25)
     sibling_drift_correlation = 1
     noise_frac = 0.05
 
-    compare(seasons=(1, 2, 3, 4), weeks_per_season= 5, branching=2,
-            n_hubs=2, n_types=3, hub_correlation=hub_correlation,
+    compare(seasons=(1, 2, 3, 4), weeks_per_season= 10, branching=2,
+            n_hubs=3, n_types=3, hub_correlation=hub_correlation,
             solver_params={"TimeLimit": 1200, "MIPGap": 0.01},
             make_plots=True, plot_dir="compare_plots", seed=seed, season_drift=season_drift,
             sibling_drift_correlation=sibling_drift_correlation,
