@@ -179,6 +179,21 @@ def build_distance_based_alpha(hub_meta, N, K):
             alpha[i, j, 0] = min(BIKE_RATE_PER_KM_EUR * d, BIKE_MAX_COST_EUR)
             for k in (1, 2):
                 alpha[i, j, k] = (FUEL_PRICE_PER_KM_EUR[k] + DRIVER_COST_PER_KM_EUR[k]) * d
+                if 0 <alpha[i, j, k] <=30:
+                    alpha[i, j, k] = 15
+                elif 30 <alpha[i, j, k] <=60:
+                    alpha[i, j, k] = 45
+                elif 60 <alpha[i, j, k] <=90:
+                    alpha[i, j, k] = 75
+                elif 90 <alpha[i, j, k] <=120:
+                    alpha[i, j, k] = 105
+                elif 120 <alpha[i, j, k] <=150:
+                    alpha[i, j, k] = 135
+                elif 150 <alpha[i, j, k] <=180:
+                    alpha[i, j, k] = 165
+                elif 180 <alpha[i, j, k] <=210:
+                    alpha[i, j, k] = 195
+
     return alpha
 
 

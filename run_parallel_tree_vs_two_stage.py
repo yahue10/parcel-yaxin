@@ -50,8 +50,8 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 GUROBI_OPTIONS = None
 
 SOLVER_PARAMS = {
-    "TimeLimit": 108000,
-    "MIPGap": 0.05,
+    "TimeLimit": 864000,
+    "MIPGap": 0.03,
     "Threads": 32,
     "Presolve": 2,
 }
@@ -106,11 +106,11 @@ INSTANCES = [
     # season_drift/sibling_drift_correlation still apply on top of the real
     # base level. n_hubs picks the first N hubs listed in the data (capped
     # at 21).
-    {"label": "hub16_real_branch2_seed55", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
-     "branching": 2, "n_hubs": 16, "n_types": 3, "seed": 55,
+    {"label": "hub16_real_branch2_seed12", "seasons": (1, 2, 3, 4), "weeks_per_season": 13,
+     "branching": 2, "n_hubs": 16, "n_types": 3, "seed": 12,
      "season_drift": (0.20, 0.25), "sibling_drift_correlation": 1,
      "demand_source": "real", "mrp_variant": "tree",
-     "mrp_solver_params": {"MIPGap": 0.05}},
+     "mrp_solver_params": {"MIPGap": 0.05, "Heuristics": 0.5, "MIPFocus": 1,}},
 
 ]
 

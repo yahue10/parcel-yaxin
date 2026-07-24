@@ -1,0 +1,143 @@
+
+Gurobi 13.0.1 (mac64[arm]) logging started Thu Jul 23 16:31:47 2026
+
+Set parameter LogFile to value "compare_plots/gurobi_log/mnp.log"
+Set parameter LogToConsole to value 0
+Gurobi Optimizer version 13.0.1 build v13.0.1rc0 (mac64[arm] - Darwin 25.5.0 25F84)
+
+CPU model: Apple M1
+Thread count: 8 physical cores, 8 logical processors, using up to 8 threads
+
+Non-default parameters:
+TimeLimit  1200
+MIPGap  0.01
+LogToConsole  0
+
+Optimize a model with 4998 rows, 7536 columns and 37455 nonzeros (Min)
+Model fingerprint: 0xf0b6fa04
+Model has 7527 linear objective coefficients
+Variable types: 0 continuous, 7536 integer (0 binary)
+Coefficient statistics:
+  Matrix range     [1e+00, 2e+03]
+  Objective range  [3e+01, 3e+04]
+  Bounds range     [0e+00, 0e+00]
+  RHS range        [3e+01, 8e+05]
+
+Found heuristic solution: objective 1.446534e+07
+Presolve removed 2759 rows and 4137 columns
+Presolve time: 0.03s
+Presolved: 2239 rows, 3399 columns, 16779 nonzeros
+Variable types: 0 continuous, 3399 integer (0 binary)
+
+Root relaxation: objective 1.058040e+07, 1677 iterations, 0.03 seconds (0.05 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0 1.0580e+07    0 1436 1.4465e+07 1.0580e+07  26.9%     -    0s
+H    0     0                    1.075985e+07 1.0580e+07  1.67%     -    0s
+H    0     0                    1.063020e+07 1.0580e+07  0.47%     -    0s
+
+Explored 1 nodes (1678 simplex iterations) in 0.07 seconds (0.11 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 3: 1.06302e+07 1.07599e+07 1.44653e+07 
+
+Optimal solution found (tolerance 1.00e-02)
+Best objective 1.063019550000e+07, best bound 1.058040170333e+07, gap 0.4684%
+
+Gurobi 13.0.1 (mac64[arm]) logging started Thu Jul 23 17:19:22 2026
+
+Set parameter LogFile to value "compare_plots/gurobi_log/mnp.log"
+Set parameter LogToConsole to value 0
+Gurobi Optimizer version 13.0.1 build v13.0.1rc0 (mac64[arm] - Darwin 25.5.0 25F84)
+
+CPU model: Apple M1
+Thread count: 8 physical cores, 8 logical processors, using up to 8 threads
+
+Non-default parameters:
+TimeLimit  1200
+MIPGap  0.01
+LogToConsole  0
+
+Optimize a model with 4998 rows, 7536 columns and 37455 nonzeros (Min)
+Model fingerprint: 0xb41eb8e9
+Model has 7527 linear objective coefficients
+Variable types: 0 continuous, 7536 integer (0 binary)
+Coefficient statistics:
+  Matrix range     [1e+00, 2e+03]
+  Objective range  [3e+01, 3e+04]
+  Bounds range     [0e+00, 0e+00]
+  RHS range        [1e+02, 6e+05]
+
+Found heuristic solution: objective 1.153109e+07
+Presolve removed 2811 rows and 4215 columns
+Presolve time: 0.03s
+Presolved: 2187 rows, 3321 columns, 16389 nonzeros
+Variable types: 0 continuous, 3321 integer (0 binary)
+
+Root relaxation: objective 7.624316e+06, 1048 iterations, 0.01 seconds (0.02 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0 7624316.41    0  826 1.1531e+07 7624316.41  33.9%     -    0s
+H    0     0                    7844734.1250 7624316.41  2.81%     -    0s
+H    0     0                    7708400.0000 7624316.41  1.09%     -    0s
+H    0     0                    7698347.8750 7624316.41  0.96%     -    0s
+
+Explored 1 nodes (1051 simplex iterations) in 0.06 seconds (0.09 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 4: 7.69835e+06 7.7084e+06 7.84473e+06 1.15311e+07 
+
+Optimal solution found (tolerance 1.00e-02)
+Best objective 7.698347875000e+06, best bound 7.624316410000e+06, gap 0.9617%
+
+Gurobi 13.0.1 (mac64[arm]) logging started Fri Jul 24 11:40:16 2026
+
+Set parameter LogFile to value "compare_plots/gurobi_log/mnp.log"
+Set parameter LogToConsole to value 0
+Gurobi Optimizer version 13.0.1 build v13.0.1rc0 (mac64[arm] - Darwin 25.5.0 25F84)
+
+CPU model: Apple M1
+Thread count: 8 physical cores, 8 logical processors, using up to 8 threads
+
+Non-default parameters:
+TimeLimit  1200
+MIPGap  0.01
+LogToConsole  0
+
+Optimize a model with 3334 rows, 5025 columns and 24972 nonzeros (Min)
+Model fingerprint: 0x98145a45
+Model has 5019 linear objective coefficients
+Variable types: 0 continuous, 5025 integer (0 binary)
+Coefficient statistics:
+  Matrix range     [1e+00, 2e+03]
+  Objective range  [3e+01, 3e+04]
+  Bounds range     [0e+00, 0e+00]
+  RHS range        [1e+02, 4e+05]
+
+Found heuristic solution: objective 5469436.1250
+Presolve removed 1933 rows and 2898 columns
+Presolve time: 0.02s
+Presolved: 1401 rows, 2127 columns, 10491 nonzeros
+Variable types: 0 continuous, 2127 integer (0 binary)
+
+Root relaxation: objective 3.469174e+06, 522 iterations, 0.00 seconds (0.01 work units)
+
+    Nodes    |    Current Node    |     Objective Bounds      |     Work
+ Expl Unexpl |  Obj  Depth IntInf | Incumbent    BestBd   Gap | It/Node Time
+
+     0     0 3469173.88    0  480 5469436.13 3469173.88  36.6%     -    0s
+H    0     0                    3609416.1250 3469173.88  3.89%     -    0s
+H    0     0                    3530398.5000 3469173.88  1.73%     -    0s
+H    0     0                    3487926.5000 3469173.88  0.54%     -    0s
+
+Explored 1 nodes (522 simplex iterations) in 0.04 seconds (0.05 work units)
+Thread count was 8 (of 8 available processors)
+
+Solution count 4: 3.48793e+06 3.5304e+06 3.60942e+06 5.46944e+06 
+
+Optimal solution found (tolerance 1.00e-02)
+Best objective 3.487926500000e+06, best bound 3.469173875000e+06, gap 0.5376%
