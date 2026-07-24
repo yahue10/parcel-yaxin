@@ -154,7 +154,7 @@ def build_cost_params(N, K, overrides=None):
     gamma = {0: 300, 1: 800, 2: 732}
     gamma_corr = {k: 1.5 * v for k, v in gamma.items()}
     theta = {i: 0.3 for i in N}
-    S = {0: 100, 1: 100, 2: 100}
+    S = {0: 1000, 1: 1000, 2: 1000}
     g = {0: 1, 1: 1, 2: 0}                              # 1 = green vehicle type
 
     params = dict(q=q, beta=beta, alpha=alpha, gamma=gamma, gamma_corr=gamma_corr,

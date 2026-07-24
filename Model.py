@@ -360,7 +360,7 @@ class VehicleAllocationModel:
                     self.model.addConstr(
                         quicksum(self.q[k] * (
                             x[i, k, t, o] + s[i, k, b] + s_corr[i, k, t, o]) for k in self.Ki[i])
-                         >= self.d_real[i, t, o],
+                         >= int(self.d_real[i, t, o]),
                         name=f"real_demand_{i}_{k}_{t}_{o}"
                     )
                     self.model.addConstr(

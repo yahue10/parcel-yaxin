@@ -383,7 +383,7 @@ class ScenarioTreeVehicleAllocationModel:
                         for k in self.Ki[i]
                     }
                     m.addConstr(
-                        sum(self.q[k] * coverage[k] for k in self.Ki[i]) >= nd.demand[i, t],
+                        sum(self.q[k] * coverage[k] for k in self.Ki[i]) >= int(nd.demand[i, t]),
                         name=f"demand_{n}_{i}_{t}"
                     )
                     green_k = [k for k in self.Ki[i] if k in self.K_green]
