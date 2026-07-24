@@ -98,8 +98,8 @@ def load_hub_data(n_hubs, data_dir=DEFAULT_DATA_DIR, info_csv=DEFAULT_INFO_CSV, 
     full_fixed_df = pd.DataFrame(full_fixed, index=corr_df.index, columns=corr_df.columns)
     corr_matrix = full_fixed_df.loc[hub_ids, hub_ids].values
 
-    base_demand = {i: int(chosen.loc[i, "mean_weekly_demand"]) for i in range(n_hubs)}
-    cv_by_hub = {i: int(chosen.loc[i, "std_weekly_demand"] / chosen.loc[i, "mean_weekly_demand"])
+    base_demand = {i: float(chosen.loc[i, "mean_weekly_demand"]) for i in range(n_hubs)}
+    cv_by_hub = {i: float(chosen.loc[i, "std_weekly_demand"] / chosen.loc[i, "mean_weekly_demand"])
                  for i in range(n_hubs)}
     hub_meta = {i: {"regate": chosen.loc[i, "regate"], "site": chosen.loc[i, "site"],
                      "lat": chosen.loc[i, "lat"], "lng": chosen.loc[i, "lng"],
